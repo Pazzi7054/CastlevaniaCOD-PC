@@ -23,11 +23,15 @@
 // game settings beside the runtime's, in the settings file (game_info.cpp lists them)
 bool g_fps_counter = false;
 bool g_pause_on_focus_loss = true;
+uint32_t g_menu_key = VK_F10;  // virtual key that opens the menu
+bool g_launcher_keep_open = false;  // the launcher's, kept when the game writes the file
 
 namespace {
 
 std::atomic<bool> g_open{false};
 bool g_scaled = false;
+
+std::string KeyName(uint32_t vk);  // the key as the keyboard labels it
 
 struct Res {
     uint32_t w, h;
@@ -158,10 +162,15 @@ void ControlsTab() {
         {"W A S D", "Move"},           {"Arrow keys", "Camera"},   {"K / Space", "A (jump)"},
         {"J", "X (attack)"},           {"L", "B"},                 {"I", "Y"},
         {"Q / E", "Left / right trigger"}, {"Z / C", "White / black"}, {"Enter", "Start"},
-        {"Backspace", "Back"},         {"Numpad 8 2 4 6", "D-pad"}, {"F10", "This menu"},
+        {"Backspace", "Back"},         {"Numpad 8 2 4 6", "D-pad"},
         {"L3 + R3 (controller)", "This menu"},
     };
     if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(KeyName(g_menu_key).c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("This menu (change it in the launcher)");
         for (auto& k : kKeys) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -181,6 +190,39 @@ void Defaults() {
     g_fps_counter = false;
     g_pause_on_focus_loss = true;
     app::ApplyDisplay();
+}
+
+std::string KeyName(uint32_t vk) {
+    wchar_t name[64] = {};
+    LONG scan = LONG(MapVirtualKeyW(vk, MAPVK_VK_TO_VSC)) << 16;
+    // keys of the navigation block share scan codes with the numpad: the extended bit tells them apart
+    if ((vk >= VK_PRIOR && vk <= VK_DOWN) || vk == VK_INSERT || vk == VK_DELETE) scan |= 1 << 24;
+    if (!GetKeyNameTextW(scan, name, 64)) return "F10";
+    char out[64];
+    WideCharToMultiByte(CP_UTF8, 0, name, -1, out, sizeof(out), nullptr, nullptr);
+    return out;
+}
+
+bool Foreground() {
+    HWND fg = GetForegroundWindow();
+    DWORD pid = 0;
+    GetWindowThreadProcessId(fg, &pid);
+    return fg && pid == GetCurrentProcessId();
+}
+
+bool Down(uint32_t vk) { return (GetAsyncKeyState(int(vk)) & 0x8000) != 0; }
+
+// render thread, each frame: the menu key's state is read rather than its messages, which an overlay or another
+// program's hotkey can take before the window sees them
+void PollKeys() {
+    static bool menu_was = false, escape_was = false;
+    bool fg = Foreground();
+    bool menu = fg && Down(g_menu_key ? g_menu_key : VK_F10);
+    if (menu && !menu_was) g_open = !g_open;
+    menu_was = menu;
+    bool escape = fg && Down(VK_ESCAPE);
+    if (escape && !escape_was) g_open = false;
+    escape_was = escape;
 }
 
 void Style(float scale) {
@@ -234,19 +276,14 @@ void MenuWindow() {
     g_scaled = true;
 }
 
-// window thread: F10 opens and closes the menu, Escape closes it
+// window thread: the menu key and Escape are taken here so the host does nothing with them (F10 alone would put
+// the window in menu mode); PollKeys opens and closes the menu
 extern std::atomic<bool> g_closing;  // keyboard.cpp
 
-bool MenuMessage(void*, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* result) {
+bool MenuMessage(void*, uint32_t msg, uintptr_t wp, intptr_t, intptr_t* result) {
     if (msg == WM_CLOSE) g_closing = true;
-    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && (wp == VK_F10 || (wp == VK_ESCAPE && g_open))) {
-        bool repeat = (lp >> 30) & 1;  // a held key's repeats
-        if (!repeat) g_open = wp == VK_F10 ? !g_open : false;
-        *result = 0;
-        return true;
-    }
-    // F10 alone would open the system menu
-    if (msg == WM_SYSKEYUP && wp == VK_F10) {
+    bool key = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYUP;
+    if (key && (wp == VK_F10 || wp == g_menu_key || (wp == VK_ESCAPE && g_open))) {
         *result = 0;
         return true;
     }
@@ -255,6 +292,7 @@ bool MenuMessage(void*, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* resul
 
 void MenuUi(double fps) {
     if (!g_scaled) return;
+    PollKeys();
     ImGuiIO& io = ImGui::GetIO();
     if (g_fps_counter) {
         char text[32];
@@ -305,9 +343,10 @@ void MenuUi(double fps) {
             save = true;
         }
         ImGui::SameLine();
-        float close_w = ImGui::CalcTextSize("Close (F10)").x + ImGui::GetStyle().FramePadding.x * 2;
+        std::string close = "Close (" + KeyName(g_menu_key) + ")";
+        float close_w = ImGui::CalcTextSize(close.c_str()).x + ImGui::GetStyle().FramePadding.x * 2;
         ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - close_w);
-        if (ImGui::Button("Close (F10)")) open = false;
+        if (ImGui::Button(close.c_str())) open = false;
         if (save) app::Save();
     }
     ImGui::End();

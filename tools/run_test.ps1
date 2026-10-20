@@ -7,7 +7,8 @@ param(
     [int]$Seconds = 0,
     [int[]]$F3At = @(),        # press F3 then: guest stacks into the log, a frame capture if XBE_CAPTURE_DIR is set
     [int[]]$F10At = @(),       # press F10 then: the settings menu opens or closes
-    [int[]]$KeyAt = @(),       # press F10 then as a real key (SendInput), the way a player does
+    [int[]]$KeyAt = @(),       # press -Key then as a real key (keybd_event), the way a player does
+    [int]$Key = 0x79,          # virtual key for -KeyAt, F10 by default
     [string[]]$Env = @()       # NAME=value pairs for this run
 )
 foreach ($kv in $Env) { $k, $v = $kv -split "=", 2; Set-Item "env:$k" $v }
@@ -42,9 +43,9 @@ for ($t = 1; $t -le $end; $t++) {
     }
     if ($KeyAt -contains $t) {
         $p.Refresh(); [void][W2]::SetForegroundWindow($p.MainWindowHandle); Start-Sleep -Milliseconds 200
-        [W2]::keybd_event(0x79, 0x44, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80
-        [W2]::keybd_event(0x79, 0x44, 2, [UIntPtr]::Zero)
-        "t=$t F10 key"
+        [W2]::keybd_event([byte]$Key, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80
+        [W2]::keybd_event([byte]$Key, 0, 2, [UIntPtr]::Zero)
+        "t=$t key $Key"
     }
     if ($At -contains $t) {
         $p.Refresh(); $h = $p.MainWindowHandle

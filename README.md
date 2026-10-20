@@ -30,16 +30,23 @@ in PowerShell.
 There are no prebuilt downloads: the executable contains code recompiled from the game, so it is built on your own
 PC from your own copy (see [Building](#building)).
 
-- Run `out\build\release\Castlevania.exe`.
+- Run `out\build\release\CastlevaniaLauncher.exe`, or `Castlevania.exe` to skip the launcher.
 - The game can run from the extracted files in `assets`, or from an ISO of the disc placed in `assets`.
 - Recomp settings can be adjusted in `castlevania.toml` beside the exe. Saves go to `hdd\E\UDATA\4b4e002d`.
 
 ## Features
 
+### Launcher
+`CastlevaniaLauncher.exe` checks your game files (the USA `default.xbe` by its hash, or a disc image), adds a disc
+image to `assets` for you (a hard link on the same drive, otherwise a copy), and has every setting: display mode,
+resolution, v-sync, widescreen, render scale, anisotropic filtering with quick presets, FPS counter, pause on focus
+loss and the settings menu key. **Play** saves them and starts the game. Saves and logs are a click away.
+
 ### Settings Menu
-Press **F10** in game for the settings menu, or click both sticks in (**L3 + R3**) on a controller. Every change
-applies at once and is saved to `castlevania.toml`. While the menu is open the game gets no input; Escape, F10 or
-L3 + R3 closes it.
+Press **F10** in game for the settings menu, or click both sticks in (**L3 + R3**) on a controller. The key can be
+changed in the launcher (Game tab), for keyboards where F10 needs Fn or is taken by another program. Every change
+applies at once and is saved to `castlevania.toml`. While the menu is open the game gets no input; Escape, the menu
+key or L3 + R3 closes it.
 
 ### Display
 - **Any Resolution** - Renders at your display's resolution instead of 640x480.
@@ -78,7 +85,7 @@ The keyboard plays as player 1 while the window is in front:
 | Z / C | white / black |
 | Enter / Backspace | Start / Back |
 | numpad 8 2 4 6 | d-pad |
-| F10 | settings menu (L3 + R3 on a controller) |
+| F10 (changeable) | settings menu (L3 + R3 on a controller) |
 
 ### Miscellaneous
 - **Boot Splash** - Place a `splash.png` (or `.bmp`) beside the exe to display a splash screen at launch.
@@ -112,7 +119,8 @@ Install Visual Studio 2022 or newer with **Desktop development with C++** and **
 Clang (**C++ Clang tools for Windows**, or `winget install LLVM.LLVM`).
 
 ### 4. Build the Project
-Run `build.bat`. The first build recompiles the game and takes a while. The exe is written to `out\build\release`.
+Run `build.bat`. The first build recompiles the game and takes a while. `Castlevania.exe` and
+`CastlevaniaLauncher.exe` are written to `out\build\release`.
 
 ## Port Notes
 
@@ -126,6 +134,11 @@ Changes this game needed beyond the generated config:
   every single texture quad drew white); `XBE_VERBOSE` lets a release build log info lines; a `widescreen` setting;
   for renderer extensions, `ShaderHooks::Position` (HLSL after the vertex position is set), `Extension::Vertices`
   (each draw's assembled vertices) and `gpu::ReadsConstant`.
+- `src\common\menu.cpp`: the menu key's state is read every frame instead of waiting for its key messages, which an
+  overlay or another program's hotkey can take first; the messages are still swallowed so F10 never puts the window
+  in menu mode.
+- `src\launcher`: the launcher, Direct3D 11 and Dear ImGui, no game code; it checks `default.xbe` against the SHA-1
+  the build wrote for `Castlevania.exe`.
 - `src\common\widescreen.cpp`, a renderer extension:
   - Widescreen. The game projects with a PS2 style view screen matrix (`c68`, or `c85` with the world matrix) and
     maps PS2 screen space to console pixels with `c94`/`c95`. Each draw into the back buffer is squeezed to 3/4 of its

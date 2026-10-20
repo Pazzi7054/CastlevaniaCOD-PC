@@ -7,6 +7,8 @@ bool MenuMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* 
 void MenuUi(double fps);                      // menu.cpp
 extern bool g_fps_counter;                    // menu.cpp
 extern bool g_pause_on_focus_loss;            // menu.cpp
+extern uint32_t g_menu_key;                   // menu.cpp
+extern bool g_launcher_keep_open;             // menu.cpp
 void WidescreenInit();                        // widescreen.cpp
 
 // what the runtime asks of the game; strings must be set, hooks may stay null
@@ -20,7 +22,9 @@ const app::GameInfo app::kGame = {
     .missing = L"Put the game in the assets folder: its disc image (.iso), or default.xbe with its folders beside it.",
     .images = {{"default.xbe", "Castlevania"}},  // each recompiled xbe and its exe, for title launches
     .options = {{"fps_counter", &g_fps_counter, nullptr},  // game settings kept in the settings file
-                {"pause_on_focus_loss", &g_pause_on_focus_loss, nullptr}},
+                {"pause_on_focus_loss", &g_pause_on_focus_loss, nullptr},
+                {"menu_key", nullptr, &g_menu_key},
+                {"launcher_keep_open", &g_launcher_keep_open, nullptr}},
     .load = nullptr,                      // reads more from the settings file's toml::table
     .save = nullptr,                      // writes more into it
     .init = WidescreenInit,               // after the settings load, before the window and boot: the renderer extension

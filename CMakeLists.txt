@@ -22,7 +22,7 @@ endif()
 include(${SDK}/cmake/XbeRecomp.cmake)
 
 file(GLOB XBE_HOST_SOURCES CONFIGURE_DEPENDS src/*/*.cpp)
-list(FILTER XBE_HOST_SOURCES EXCLUDE REGEX "/src/game/")
+list(FILTER XBE_HOST_SOURCES EXCLUDE REGEX "/src/(game|launcher)/")
 
 # partitions as xbe_symbols wrote them into config/game.toml
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS config/game.toml)
@@ -37,3 +37,20 @@ endif()
 
 # target name = GAME_EXE in build.bat, xbe = GAME_XBE
 add_xbe_image(Castlevania default.xbe game.toml ${GAME_PARTITIONS} game)
+
+# the launcher beside it: game files check, settings, play; no game code, the xbe's SHA-1 add_xbe_image wrote
+add_executable(CastlevaniaLauncher WIN32
+    src/launcher/launcher.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/Castlevania_xbe.cpp
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp)
+target_include_directories(CastlevaniaLauncher SYSTEM PRIVATE ${imgui_SOURCE_DIR})
+target_compile_definitions(CastlevaniaLauncher PRIVATE UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(CastlevaniaLauncher PRIVATE -Wno-nontrivial-memcall)  # Dear ImGui's own sources
+target_link_libraries(CastlevaniaLauncher PRIVATE tomlplusplus::tomlplusplus d3d11 dxgi d3dcompiler bcrypt comdlg32 dwmapi shell32)
+target_link_options(CastlevaniaLauncher PRIVATE -fuse-ld=lld)
+add_dependencies(Castlevania CastlevaniaLauncher)
