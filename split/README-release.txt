@@ -15,6 +15,12 @@ GETTING STARTED
 CastlevaniaLauncher.exe has every setting (display, widescreen, render scale, controls) and
 checks your game files. In game, F10 or clicking both sticks in (L3 + R3) opens the settings.
 
+HD TEXTURE PACKS
+  Texture packs made for PCSX2 work too: put the pack's replacement pictures (its .png files,
+  folders inside are fine) in the textures folder. The game matches them the way PCSX2 does,
+  by the original textures' hashes. The launcher's Graphics page turns the pack on or off and
+  sets the largest size pictures load at (2048 by default; Full needs a lot of video memory).
+
 Saves are in hdd\E\UDATA\4b4e002d. Logs, including logs\setup.log from the first start, are in logs.
 
 The compiler folder holds what builds the game code on your PC: the recompiler, and Clang and

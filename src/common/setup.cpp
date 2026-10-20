@@ -408,7 +408,8 @@ bool Build(const std::vector<uint8_t>& xbe, const fs::path& dll) {
 bool CvWire(HMODULE dll);  // host_glue.cpp, written by split/glue.py
 #endif
 
-void WidescreenInit();  // widescreen.cpp
+void WidescreenInit();    // widescreen.cpp
+void TexturePackInit();   // texpack.cpp
 
 // GameInfo::init: settings loaded, nothing of the game touched yet
 void GameInit() {
@@ -428,5 +429,6 @@ void GameInit() {
         if (!m || !CvWire(m)) Fail(L"CastlevaniaGame.dll was built but does not load. See logs\\setup.log.");
     }
 #endif
+    TexturePackInit();
     WidescreenInit();
 }

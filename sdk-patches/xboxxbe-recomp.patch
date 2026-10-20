@@ -65,10 +65,131 @@ index 7e6507d..d3c271d 100644
      va_list ap;
      va_start(ap, fmt);
 diff --git a/runtime/gpu/d3d12.cpp b/runtime/gpu/d3d12.cpp
-index c410f12..85bad7f 100644
+index c410f12..d7a0466 100644
 --- a/runtime/gpu/d3d12.cpp
 +++ b/runtime/gpu/d3d12.cpp
-@@ -2478,6 +2478,7 @@ void D3D12Backend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
+@@ -321,6 +321,10 @@ struct Tex {
+     uint64_t frame = 0;
+     uint64_t palette = 0;  // hash of the colours a P8 texture was decoded with
+     uint8_t flags = 0;  // Extension::Decoded's
++    // Extension::Replace's: the picture drawn instead, made once the extension has it
++    uint64_t repl_id = 0;
++    ComPtr<ID3D12Resource> repl;
++    uint32_t repl_levels = 0;
+ };
+ 
+ struct PsoKey {
+@@ -381,6 +385,7 @@ struct DrawTextures {
+     bool rt[4] = {};            // stage samples a render target
+     float k[4] = {1, 1, 1, 1};  // Extension::Sample's k
+     float wide[4] = {};         // host texels per console texel of a target read into a smaller one, 0 otherwise
++    bool replaced[4] = {};      // drawn from an extension's replacement, filtered across all its levels
+ };
+ 
+ // a draw's shaders: what they are made from, their cache keys, the hashes Compile returned and the compiled blobs
+@@ -499,6 +504,8 @@ private:
+     ID3D12Resource* BindTexture(const State& s, int stage, DrawTextures& stages);
+     ID3D12Resource* BindTargetTexture(const State& s, int stage, const TextureDesc& d, Target& t, bool box,
+                                       DrawTextures& stages);
++    void MakeReplacement(Tex& tx);
++    uint32_t repl_budget_ = 0;  // replacements made this frame, a few at most so none stalls a frame
+     ID3D12Resource* BindGuestTexture(const State& s, int stage, const TextureDesc& d, const FormatInfo& fi,
+                                      DrawTextures& stages);
+     bool CreateTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, uint64_t key);
+@@ -1608,6 +1615,7 @@ bool SameTexture(const Tex& tx, const TextureDesc& d) {
+ bool D3D12Backend::CreateTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, uint64_t key) {
+     g_perf.newtex++;
+     if (tx.res) CurrentFrame().garbage.push_back(tx.res);
++    if (tx.repl) CurrentFrame().garbage.push_back(tx.repl);
+     tx = Tex{};
+     tx.d = d;
+     tx.fmt = HostFormat(fi.host);
+@@ -1724,6 +1732,39 @@ void ReadStagePalette(const State& s, int stage, const TextureDesc& d, StagePale
+     palette.hash = Hash(palette.colours, sizeof(palette.colours));
+ }
+ 
++// the extension's replacement for a texture, once it has the pixels: a texture of its own with every level
++void D3D12Backend::MakeReplacement(Tex& tx) {
++    std::shared_ptr<const Replacement> r = ext_->Replaced(tx.repl_id);
++    if (!r) return;  // still loading
++    if (r->levels.empty()) {
++        tx.repl_id = 0;  // none after all: drawn as the title made it
++        return;
++    }
++    repl_budget_--;
++    D3D12_HEAP_PROPERTIES hp{D3D12_HEAP_TYPE_DEFAULT};
++    D3D12_RESOURCE_DESC td{};
++    td.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
++    td.Width = r->width;
++    td.Height = r->height;
++    td.DepthOrArraySize = 1;
++    td.MipLevels = UINT16(r->levels.size());
++    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    td.SampleDesc.Count = 1;
++    Tex up;
++    if (FAILED(dev_->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
++                                             IID_PPV_ARGS(&up.res)))) {
++        tx.repl_id = 0;  // drawn as the title made it
++        return;
++    }
++    up.levels = uint32_t(r->levels.size());
++    for (uint32_t l = 0; l < up.levels; l++)
++        UploadTextureLevel(up, 0, l, r->levels[l], std::max(r->width >> l, 1u) * 4);
++    D3D12_RESOURCE_STATES st = D3D12_RESOURCE_STATE_COPY_DEST;
++    Transition(up.res.Get(), st, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
++    tx.repl = up.res;
++    tx.repl_levels = up.levels;
++}
++
+ // a texture in guest memory: made again when its layout changed, uploaded again when its bytes did
+ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const TextureDesc& d, const FormatInfo& fi,
+                                                DrawTextures& stages) {
+@@ -1749,9 +1790,23 @@ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const
+             g_perf.texup_bytes += total;
+             tx.sig = sig;
+             UploadTexture(tx, d, fi, p, palette.va ? palette.colours : nullptr, same);
++            uint64_t id = ext_ ? ext_->Replace(d, p, palette.va ? palette.colours : nullptr) : 0;
++            if (id != tx.repl_id) {
++                if (tx.repl) CurrentFrame().garbage.push_back(tx.repl);
++                tx.repl.Reset();
++                tx.repl_id = id;
++            }
+         }
+     }
++    if (tx.repl_id && !tx.repl && repl_budget_) MakeReplacement(tx);
+     FillTextureView(tx, d, stages.sv[stage]);
++    if (tx.repl) {
++        stages.sv[stage].Format = DXGI_FORMAT_B8G8R8A8_UNORM;
++        stages.sv[stage].Texture2D.MipLevels = tx.repl_levels;
++        stages.replaced[stage] = true;
++        if (ext_) ext_->Sampled(d, nullptr, tx.flags, info);
++        return tx.repl.Get();
++    }
+     if (fi.depth) info.shadow = ShadowDepthKind(d.format);
+     if (ext_) ext_->Sampled(d, nullptr, tx.flags, info);
+     return tx.res.Get();
+@@ -1806,6 +1861,11 @@ D3D12_SAMPLER_DESC StageSampler(const State& s, int i, const DrawTextures& stage
+     sd.Filter = D3D12_FILTER(fmin << 4 | fmag << 2 | fmip);
+     bool anisotropic = min == kTexfAnisotropic || mag == kTexfAnisotropic;
+     uint32_t an = anisotropic ? std::max<uint32_t>(t[kTssMaxAnisotropy], 1) : 1;
++    // a replacement is far larger than the console's texture: filtered across its levels whatever the title asked
++    if (stages.replaced[i]) {
++        mip = kTexfLinear;
++        sd.Filter = D3D12_FILTER(fmin << 4 | fmag << 2 | D3D12_FILTER_TYPE_LINEAR);
++    }
+     // forced only where the title filters across mip levels and the texture has them
+     if (aniso && lin(min) && mip && stages.sv[i].Texture2D.MipLevels > 1 && !stages.info[i].shadow) an = aniso;
+     if (an > 1) {
+@@ -1817,7 +1877,7 @@ D3D12_SAMPLER_DESC StageSampler(const State& s, int i, const DrawTextures& stage
+     sd.AddressV = Address(clamp && t[kTssAddressV] == kTaddressWrap ? kTaddressClamp : t[kTssAddressV]);
+     sd.AddressW = Address(t[kTssAddressW]);
+     sd.MipLODBias = Bits(t[kTssMipLodBias]);
+-    sd.MinLOD = float(t[kTssMaxMipLevel]);
++    sd.MinLOD = stages.replaced[i] ? 0.0f : float(t[kTssMaxMipLevel]);
+     sd.MaxLOD = mip ? D3D12_FLOAT32_MAX : sd.MinLOD;
+     Color(t[kTssBorderColor], sd.BorderColor);
+     if (stages.info[i].shadow) {
+@@ -2478,6 +2538,7 @@ void D3D12Backend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
      if (ext_) ext_->BeginDraw(s);
      Assembled& a = asm_;
      if (!AssembleDraw(s, prim, start, count, indices, a)) return;
@@ -76,8 +197,24 @@ index c410f12..85bad7f 100644
      // past the ring every upload is a buffer of its own: seconds lost on a frame that draws a whole level once
      if (CurrentFrame().used > kUploadSize - kUploadReserve) Submit(true);
      if (!BindTargets(s)) return;
+@@ -2892,6 +2953,7 @@ void D3D12Backend::ReleaseOldTextures() {
+     for (auto it = textures_.begin(); it != textures_.end();) {
+         if (it->second.frame + kIdleFrames < presents_) {
+             CurrentFrame().garbage.push_back(it->second.res);
++            if (it->second.repl) CurrentFrame().garbage.push_back(it->second.repl);
+             it = textures_.erase(it);
+         } else {
+             ++it;
+@@ -2908,6 +2970,7 @@ void D3D12Backend::ResetFrame() {
+     }
+     f.alloc->Reset();
+     f.garbage.clear();
++    repl_budget_ = 2;
+     f.used = 0;
+     f.srv = 0;
+     cl_->Reset(f.alloc.Get(), nullptr);
 diff --git a/runtime/gpu/ext.h b/runtime/gpu/ext.h
-index ce6acda..0cb6e37 100644
+index ce6acda..3309a42 100644
 --- a/runtime/gpu/ext.h
 +++ b/runtime/gpu/ext.h
 @@ -17,6 +17,7 @@
@@ -88,7 +225,20 @@ index ce6acda..0cb6e37 100644
  
  namespace gpu {
  
-@@ -74,6 +75,8 @@ public:
+@@ -60,6 +61,12 @@ public:
+     virtual uint64_t Presents() const = 0;
+ };
+ 
++// a picture drawn instead of a guest texture: BGRA8 levels, the largest first, each half the one before
++struct Replacement {
++    uint32_t width = 0, height = 0;
++    std::vector<std::vector<uint8_t>> levels;
++};
++
+ class Extension {
+ public:
+     virtual ~Extension() = default;
+@@ -74,12 +81,18 @@ public:
      virtual void MakeTarget(const Surface&, bool /*depth*/, uint32_t /*gw*/, uint32_t /*gh*/, float& /*scale*/, DXGI_FORMAT& /*fmt*/) {}
      virtual void BeginDraw(const State&) {}
      virtual void EndDraw() {}
@@ -97,6 +247,16 @@ index ce6acda..0cb6e37 100644
      // targets bound for a draw; true binds them again
      virtual bool Bound(Context&, const State&, Target* /*rt*/, Target* /*ds*/, bool /*pretransformed*/) { return false; }
      // stage samples surface data: key picks the copy, k its texels per render scale texel, box allows the spread taps
+     virtual void Sample(uint32_t /*data*/, bool /*depth*/, int /*stage*/, uint64_t& /*key*/, float& /*k*/, bool& /*box*/) {}
+     // bound: the target, or a texture with the flags Decoded gave it
+     virtual void Sampled(const TextureDesc&, const Target*, uint8_t /*flags*/, TexInfo&) {}
++    // a guest texture uploaded (palette the P8 colours or null): an id for its replacement, 0 for none
++    virtual uint64_t Replace(const TextureDesc&, const uint8_t* /*guest*/, const uint32_t* /*palette*/) { return 0; }
++    // a bound texture's replacement, asked until given: its pixels once ready, null while it loads
++    virtual std::shared_ptr<const Replacement> Replaced(uint64_t /*id*/) { return nullptr; }
+     // a texture level decoded for upload
+     virtual void Decoded(const TextureDesc&, const FormatInfo&, uint32_t /*face*/, uint32_t /*level*/, const std::vector<uint8_t>& /*px*/,
+                          uint32_t /*pitch*/, uint8_t& /*flags*/) {}
 diff --git a/runtime/gpu/shaders.cpp b/runtime/gpu/shaders.cpp
 index 7e67b26..d639366 100644
 --- a/runtime/gpu/shaders.cpp
@@ -224,6 +384,42 @@ index 9b8cbdd..e636653 100644
  };
  inline const ShaderHooks* g_shader_hooks = nullptr;
  
+diff --git a/runtime/gpu/texture.cpp b/runtime/gpu/texture.cpp
+index 7c896d3..e5c7d8b 100644
+--- a/runtime/gpu/texture.cpp
++++ b/runtime/gpu/texture.cpp
+@@ -393,6 +393,18 @@ void DecodeLevel(const TextureDesc& d, uint32_t level, uint32_t face, const uint
+             }
+ }
+ 
++bool PaletteIndices(const TextureDesc& d, const uint8_t* guest, std::vector<uint8_t>& out) {
++    if (d.format != 0x0B || d.linear || d.cube || d.depth != 1) return false;
++    uint32_t mx, my, mz;
++    SwizzleMasks(d.width, d.height, 1, mx, my, mz);
++    out.resize(size_t(d.width) * d.height);
++    for (uint32_t y = 0; y < d.height; y++) {
++        uint32_t row = Deposit(y, my);
++        for (uint32_t x = 0; x < d.width; x++) out[size_t(y) * d.width + x] = guest[row | Deposit(x, mx)];
++    }
++    return true;
++}
++
+ uint32_t LinearColorFormat(uint32_t f) {
+     switch (f) {
+         case 0x06: return 0x12;
+diff --git a/runtime/gpu/texture.h b/runtime/gpu/texture.h
+index 6adb65a..d1dcd43 100644
+--- a/runtime/gpu/texture.h
++++ b/runtime/gpu/texture.h
+@@ -41,6 +41,8 @@ uint32_t TotalSize(const TextureDesc& d);
+ void DecodeLevel(const TextureDesc& d, uint32_t level, uint32_t face, const uint8_t* guest, const uint32_t* palette,
+                  std::vector<uint8_t>& out, uint32_t& row_pitch);
+ 
++// a swizzled 2D P8 texture's top level as palette indices, row by row; false for any other texture
++bool PaletteIndices(const TextureDesc& d, const uint8_t* guest, std::vector<uint8_t>& out);
+ uint32_t LinearColorFormat(uint32_t fmt);
+ uint32_t LinearDepthFormat(uint32_t fmt);
+ void SurfaceSize(const Surface& s, uint32_t& w, uint32_t& h);
 diff --git a/runtime/xdk/d3d8.cpp b/runtime/xdk/d3d8.cpp
 index cb38363..40af2dd 100644
 --- a/runtime/xdk/d3d8.cpp

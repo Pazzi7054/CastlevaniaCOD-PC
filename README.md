@@ -66,6 +66,13 @@ key or L3 + R3 closes it.
 - **No Overscan Streaks** - The rows a TV's overscan used to hide at the top and bottom of the picture no longer
   smear; the frame fills the screen.
 
+### HD Texture Packs
+Texture packs made for PCSX2 work as they are: put a pack's replacement pictures in a `textures` folder beside the
+game (folders inside it are fine). The Xbox release kept the PS2's textures, so each one is matched by the same
+hashes PCSX2 names the pictures by. Pictures load in the background with full mipmaps, scaled to the size set in the
+launcher (1024, 2048 by default, or full size). Paletted textures are replaced; region (`-rWxH`) and true colour
+pictures are not used yet.
+
 ### Graphics
 - **Native Direct3D 12 Renderer** - The game's Direct3D 8 calls, fixed function stages and paletted textures are
   drawn natively.
@@ -161,6 +168,11 @@ Changes this game needed beyond the generated config:
   in menu mode.
 - `src\launcher`: the launcher, Direct3D 11 and Dear ImGui, no game code; it checks `default.xbe` against the SHA-1
   the build wrote for `Castlevania.exe`.
+- `src\common\texpack.cpp`: PCSX2 texture packs. A P8 texture's indices are put back into GS memory order, 16x16
+  (8 bit) or 32x16 (4 bit, indices under 16) blocks in the GS's column layout, and hashed with XXH3-64 block by
+  block as PCSX2 does; its palette is hashed as the GS holds it (R G B A, alpha halved). The pair names the picture.
+  PNGs load on worker threads through WIC with their PS2 alpha (128 opaque) doubled. The SDK patch adds
+  `Extension::Replace` and `Replaced`, `gpu::PaletteIndices`, and the backend draws a replacement with every level.
 - `src\common\widescreen.cpp`, a renderer extension:
   - Widescreen. The game projects with a PS2 style view screen matrix (`c68`, or `c85` with the world matrix) and
     maps PS2 screen space to console pixels with `c94`/`c95`. Each draw into the back buffer is squeezed to 3/4 of its
@@ -205,6 +217,8 @@ The source in this repository is released under the [GNU General Public License 
 
 - [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) by TGP482, the recompiler and runtime this is built on.
 - [LLVM](https://llvm.org) for Clang and LLD, which releases bundle to build the game code on the player's PC.
+- [xxHash](https://github.com/Cyan4973/xxHash) for hashing textures, and [PCSX2](https://pcsx2.net) for the texture
+  pack naming its replacement pictures follow.
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) for the overridable function layout and instruction hooks.
 - [Zydis](https://github.com/zyantific/zydis) for decoding x86 instructions, [toml++](https://github.com/marzer/tomlplusplus) for the configs, [Dear ImGui](https://github.com/ocornut/imgui) for the settings overlay and [SDL](https://github.com/libsdl-org/SDL) for the window, input and controllers.
 - [xemu](https://github.com/xemu-project/xemu) and [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) as references for the Xbox's hardware and API behaviour.

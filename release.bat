@@ -41,7 +41,7 @@ cmake --build %SPLIT% --target Castlevania CastlevaniaLauncher xbe_recomp || got
 
 echo [5/6] Package
 if exist out\release rd /s /q out\release
-mkdir "%PKG%\assets" "%PKG%\compiler\include\cpu" "%PKG%\compiler\xdk\5849"
+mkdir "%PKG%\assets" "%PKG%\textures" "%PKG%\compiler\include\cpu" "%PKG%\compiler\xdk\5849"
 for %%f in (Castlevania.exe CastlevaniaLauncher.exe) do copy /y "%SPLIT%\%%f" "%PKG%\" >nul
 for %%f in (msvcp140 vcruntime140 vcruntime140_1) do (
     copy /y "%VCRT%\%%f.dll" "%PKG%\" >nul
@@ -61,6 +61,7 @@ copy /y LICENSE "%PKG%\LICENSE.txt" >nul
 copy /y split\LLVM-LICENSE.txt "%PKG%\compiler\LLVM-LICENSE.txt" >nul
 copy /y "%SDK%\THIRD_PARTY.txt" "%PKG%\THIRD_PARTY.txt" >nul
 echo Put your game here: its disc image (.iso), or the extracted disc (default.xbe with its folders).> "%PKG%\assets\PUT YOUR GAME HERE.txt"
+echo Optional: an HD texture pack made for PCSX2. Put its replacement pictures here (the .png files, folders inside are fine).> "%PKG%\textures\PUT A TEXTURE PACK HERE.txt"
 
 rem nothing of the game goes out: no generated code, no objects but the glue, no xbe or image
 for /r "%PKG%" %%f in (*.xbe *.iso *.cpp x86_recomp*) do (echo       game file in the package: %%f & goto :fail)

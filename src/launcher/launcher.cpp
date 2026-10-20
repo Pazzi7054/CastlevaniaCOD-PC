@@ -145,13 +145,34 @@ std::string Utf8(const std::wstring& w) {
 void Open(const fs::path& p) { ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }
 
 // what the game will find
+// the textures folder the game looks for, found the same way as assets
+fs::path FindTextures() {
+    fs::path dir = ExeDir();
+    std::error_code ec;
+    for (int i = 0; i < 6; i++) {
+        if (fs::is_directory(dir / "textures", ec)) return dir / "textures";
+        if (!dir.has_parent_path() || dir.parent_path() == dir) break;
+        dir = dir.parent_path();
+    }
+    return {};
+}
+
 struct Files {
     fs::path assets;
     enum class Xbe { Missing, Match, Other } xbe = Xbe::Missing;
     std::vector<fs::path> isos;
     bool exe = false;
+    fs::path textures;
+    size_t pictures = 0;  // .png in textures and the folders inside it
 
     void Scan() {
+        textures = FindTextures();
+        pictures = 0;
+        if (!textures.empty()) {
+            std::error_code ec;
+            for (auto it = fs::recursive_directory_iterator(textures, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+                pictures += it->path().extension() == ".png";
+        }
         assets = FindAssets();
         xbe = Xbe::Missing;
         isos.clear();
@@ -218,6 +239,8 @@ struct Settings {
     bool pause_on_focus_loss = true;
     uint32_t menu_key = VK_F10;
     bool keep_open = false;  // the launcher's own
+    bool texture_pack = true;
+    uint32_t texture_pack_size = 2048;  // 0 full size
     toml::table rest;
 
     fs::path File() const { return ExeDir() / kSettings; }
@@ -239,6 +262,8 @@ struct Settings {
         pause_on_focus_loss = rest["pause_on_focus_loss"].value_or(pause_on_focus_loss);
         menu_key = rest["menu_key"].value_or(menu_key);
         keep_open = rest["launcher_keep_open"].value_or(keep_open);
+        texture_pack = rest["texture_pack"].value_or(texture_pack);
+        texture_pack_size = rest["texture_pack_size"].value_or(texture_pack_size);
     }
 
     bool Save() {
@@ -253,6 +278,8 @@ struct Settings {
         rest.insert_or_assign("pause_on_focus_loss", pause_on_focus_loss);
         rest.insert_or_assign("menu_key", int64_t(menu_key));
         rest.insert_or_assign("launcher_keep_open", keep_open);
+        rest.insert_or_assign("texture_pack", texture_pack);
+        rest.insert_or_assign("texture_pack_size", int64_t(texture_pack_size));
         std::ofstream f(File());
         f << rest << "\n";
         return bool(f);
@@ -712,7 +739,8 @@ private:
         return s.display_mode + "|" + std::to_string(s.width) + "x" + std::to_string(s.height) + "|" +
                std::to_string(s.render_percent) + "|" + std::to_string(s.aniso) + "|" + std::to_string(s.vsync) +
                std::to_string(s.widescreen) + std::to_string(s.fps_counter) + std::to_string(s.pause_on_focus_loss) +
-               std::to_string(s.keep_open) + "|" + std::to_string(s.menu_key);
+               std::to_string(s.keep_open) + "|" + std::to_string(s.menu_key) + "|" + std::to_string(s.texture_pack) +
+               std::to_string(s.texture_pack_size);
     }
 
     void AutoSave() {
@@ -910,6 +938,29 @@ private:
         BeginSetting("Anisotropic filtering", "Sharper textures on floors and walls seen at an angle.");
         Segmented<uint32_t>("aniso", settings_.aniso, {0, 2, 4, 8, 16}, {"Off", "2x", "4x", "8x", "16x"});
         EndSetting();
+        EndCard();
+        BeginCard("texpack");
+        BeginSetting("HD texture pack", "Texture packs made for PCSX2 replace the game's textures: put a pack's "
+                                        "replacement pictures in the textures folder.", true);
+        ToggleRight("texpack", settings_.texture_pack);
+        EndSetting();
+        BeginSetting("Texture size", "The largest side a picture is loaded at. Larger is sharper and needs more video "
+                                     "memory and loading time.");
+        Segmented<uint32_t>("texsize", settings_.texture_pack_size, {1024, 2048, 0}, {"1024", "2048", "Full"});
+        EndSetting();
+        ImGui::Dummy({0, S(2)});
+        if (files_.pictures) Status(kIconCheck, kGreen, std::to_string(files_.pictures) + " pictures in the textures folder");
+        else Status(kIconWarn, kMuted, "No pack in the textures folder");
+        ImGui::Dummy({0, S(4)});
+        if (Button("Open textures folder", {0, 0}, Kind::Secondary, kIconFolder)) {
+            fs::path t = files_.textures.empty() ? ExeDir() / "textures" : files_.textures;
+            std::error_code ec;
+            fs::create_directories(t, ec);
+            Open(t);
+            rescan_ = true;
+        }
+        ImGui::SameLine();
+        if (Button("Check again", {0, 0}, Kind::Secondary, kIconRefresh)) rescan_ = true;
         EndCard();
     }
 

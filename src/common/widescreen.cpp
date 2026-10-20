@@ -19,6 +19,9 @@
 #include "app/app.h"
 #include "gpu/ext.h"
 
+uint64_t TexturePackReplace(const gpu::TextureDesc& d, const uint8_t* guest, const uint32_t* palette);  // texpack.cpp
+std::shared_ptr<const gpu::Replacement> TexturePackReplaced(uint64_t id);                              // texpack.cpp
+
 namespace {
 
 constexpr float kSqueeze = (4.0f / 3.0f) / (16.0f / 9.0f);
@@ -92,6 +95,12 @@ public:
     }
 
     void Sampled(const gpu::TextureDesc&, const gpu::Target* t, uint8_t, gpu::TexInfo&) override { target_ |= t != nullptr; }
+
+    // HD texture packs (texpack.cpp)
+    uint64_t Replace(const gpu::TextureDesc& d, const uint8_t* guest, const uint32_t* palette) override {
+        return TexturePackReplace(d, guest, palette);
+    }
+    std::shared_ptr<const gpu::Replacement> Replaced(uint64_t id) override { return TexturePackReplaced(id); }
 
     void Constants(float (*)[4], float* ext, const gpu::Target*, uint32_t) override {
         bool squeeze = squeeze_ && back_buffer_ && app::Widescreen();

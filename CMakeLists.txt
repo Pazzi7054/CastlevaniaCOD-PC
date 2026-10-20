@@ -21,6 +21,10 @@ else()
 endif()
 include(${SDK}/cmake/XbeRecomp.cmake)
 
+# xxHash, header only: texpack.cpp hashes textures as PCSX2 does
+FetchContent_Declare(xxhash GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git GIT_TAG v0.8.2 GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(xxhash)
+
 file(GLOB XBE_HOST_SOURCES CONFIGURE_DEPENDS src/*/*.cpp)
 list(FILTER XBE_HOST_SOURCES EXCLUDE REGEX "/src/(game|launcher)/")
 
@@ -60,6 +64,8 @@ else()
     # target name = GAME_EXE in build.bat, xbe = GAME_XBE
     add_xbe_image(Castlevania default.xbe game.toml ${GAME_PARTITIONS} game)
 endif()
+
+target_include_directories(Castlevania SYSTEM PRIVATE ${xxhash_SOURCE_DIR})
 
 # the launcher beside it: game files check, settings, play; no game code, the xbe's SHA-1 add_xbe_image wrote
 add_executable(CastlevaniaLauncher WIN32

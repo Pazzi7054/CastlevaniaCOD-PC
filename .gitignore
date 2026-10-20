@@ -44,3 +44,6 @@ build_log*.txt
 # release logs
 release_log.txt
 release_build_log.txt
+
+# HD texture packs (PCSX2 replacements), the player's own
+/textures/
