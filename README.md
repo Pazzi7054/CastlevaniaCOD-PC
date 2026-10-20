@@ -7,6 +7,21 @@ sound through XAudio2.
 > [!NOTE]
 > This project does not include any game assets. The game files in `assets` come from your own copy of the game.
 
+## Required game version
+
+Only this release is supported, because the config is tied to the exact addresses in its `default.xbe`:
+
+| | |
+|---|---|
+| Game | Castlevania: Curse of Darkness, original Xbox, **USA (NTSC-U)** |
+| Title ID | `4B4E002D` (KN-045), version 1, XDK 5849 |
+| `default.xbe` size | 7,352,320 bytes |
+| `default.xbe` SHA-1 | `423BC19B7CED263570DCE5E7CD5D81954DFBE13C` |
+| `default.xbe` MD5 | `92176FDDF071667F596680DF64DED7FE` |
+
+Other regions or builds (PAL, Japan) have different code addresses and will not work with this config. To check
+your copy, run `Get-FileHash assets\default.xbe -Algorithm SHA1` in PowerShell.
+
 ## Running
 
 `out\build\release\Castlevania.exe`. Settings are in `settings.toml` beside it, saves in `hdd\E\UDATA\4b4e002d`.
