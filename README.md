@@ -197,7 +197,8 @@ or sponsored by Konami or Microsoft.
   Microsoft Corporation. All other trademarks belong to their respective owners and are used only to identify the
   game this port works with.
 
-The source in this repository is released under the [MIT License](LICENSE). The SDK patch in `sdk-patches` modifies
+The source in this repository is released under the [GNU General Public License v2.0](LICENSE). The SDK patch in
+`sdk-patches` modifies
 [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) and is under its MIT License, Copyright (c) 2026 TGP482.
 
 ## Credits
