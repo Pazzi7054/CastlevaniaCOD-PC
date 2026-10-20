@@ -6,8 +6,8 @@ into a 64 bit Windows executable. Rendering runs on Direct3D 12 and sound on XAu
 This port was created using the [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) tool.
 
 > [!IMPORTANT]
-> This project does not include any game assets, game code or executables. You must provide the files from your own
-> legally acquired copy of the game to build it. See [Legal](#legal).
+> This project does not include any game assets or game code. You must provide the files from your own legally
+> acquired copy of the game. See [Legal](#legal).
 
 ## Required Game Version
 
@@ -27,10 +27,18 @@ in PowerShell.
 
 ## Installation
 
-There are no prebuilt downloads: the executable contains code recompiled from the game, so it is built on your own
-PC from your own copy (see [Building](#building)).
+1. Download the latest release from [Releases](https://github.com/Pazzi7054/CastlevaniaCOD-PC/releases) and extract it
+   anywhere.
+2. Run `Castlevania.exe`. The `assets` folder opens.
+3. Put your game in it: the disc image (`.iso`), or the extracted disc (`default.xbe` with its `data`, `movie` and
+   `sound` folders).
+4. Run `Castlevania.exe` again. The first start builds the game code from your copy, which takes a minute or two and
+   shows its progress. After that the game starts straight away.
 
-- Run `out\build\release\CastlevaniaLauncher.exe`, or `Castlevania.exe` to skip the launcher.
+A release contains no game code. `Castlevania.exe` holds the runtime, and the first start makes `CastlevaniaGame.dll`
+from your own `default.xbe` with the recompiler, [Clang and LLD](https://llvm.org) in the `compiler` folder.
+
+- `CastlevaniaLauncher.exe` has every setting and checks your game files; `Castlevania.exe` skips it.
 - The game can run from the extracted files in `assets`, or from an ISO of the disc placed in `assets`.
 - Recomp settings can be adjusted in `castlevania.toml` beside the exe. Saves go to `hdd\E\UDATA\4b4e002d`.
 
@@ -121,7 +129,12 @@ Clang (**C++ Clang tools for Windows**, or `winget install LLVM.LLVM`).
 
 ### 4. Build the Project
 Run `build.bat`. The first build recompiles the game and takes a while. `Castlevania.exe` and
-`CastlevaniaLauncher.exe` are written to `out\build\release`.
+`CastlevaniaLauncher.exe` are written to `out\build\release`, with the game code built in.
+
+### 5. Make a Release
+`release.bat 1.0.0` writes `out\release\CastlevaniaCOD-PC-1.0.0.zip`: `Castlevania.exe` without the game code, the
+launcher, and the `compiler` folder its first start builds the game code with on the player's PC. It needs Python,
+and checks that nothing of the game went into the package.
 
 ## Port Notes
 
@@ -136,6 +149,13 @@ Changes this game needed beyond the generated config:
   for renderer extensions, `ShaderHooks::Position` (HLSL after the vertex position is set), `Extension::Vertices`
   (each draw's assembled vertices) and `gpu::ReadsConstant`; the DirectSound mixer plays every channel of a voice,
   not only the first two (cutscene audio is a 5.1 stream with the voices in the centre channel, which was silent).
+- Releases (`release.bat`, `split\`, `src\common\setup.cpp`): the game code lives in `CastlevaniaGame.dll`, built on the
+  player's PC on the first start. `split\glue.py` reads a whole build's objects and writes both sides of the split:
+  the DLL forwards the runtime's functions and the 240 game functions the host replaces to `Castlevania.exe` through
+  a table it is handed, and the exe reaches the 7 recompiled originals it calls and fills the function table from
+  the DLL. The recompiled code compiles against small freestanding headers (`split\include`) and links against
+  import libraries made from `split\crt` for `vcruntime140.dll` and `ucrtbase.dll`, so no Visual Studio is needed on
+  the player's PC. A DLL whose stamp does not match the exe is built again.
 - `src\common\menu.cpp`: the menu key's state is read every frame instead of waiting for its key messages, which an
   overlay or another program's hotkey can take first; the messages are still swallowed so F10 never puts the window
   in menu mode.
@@ -166,12 +186,13 @@ Changes this game needed beyond the generated config:
 This is a non-commercial fan project for preservation and interoperability. It is not affiliated with, endorsed by
 or sponsored by Konami or Microsoft.
 
-- This repository contains only original source code, configuration and documentation. It contains **no** game
-  assets, game code (original or recompiled), disc images, BIOS, keys or Xbox SDK libraries, and none may be added.
-  `assets`, `generated` and all build output are excluded by `.gitignore`.
+- This repository and its releases contain only original source code, configuration and documentation, the port's
+  own runtime, and the LLVM compiler. They contain **no** game assets, game code (original or recompiled), disc
+  images, BIOS, keys or Xbox SDK libraries, and none may be added. `assets`, `generated` and all build output are
+  excluded by `.gitignore`; `release.bat` refuses a package with game files or objects in it.
 - `config\game.toml` lists addresses and names of functions in the game's executable. It contains no code from it.
-- The recompiled code is generated on your own PC from your own copy of the game, and the resulting executable is
-  for your personal use only. Do not distribute builds, generated code or game files.
+- The recompiled code is generated on your own PC from your own copy of the game. `CastlevaniaGame.dll`, and an
+  executable from `build.bat`, are for your personal use only. Do not distribute them, generated code or game files.
 - Castlevania and Curse of Darkness are trademarks of Konami Digital Entertainment. Xbox is a trademark of
   Microsoft Corporation. All other trademarks belong to their respective owners and are used only to identify the
   game this port works with.
@@ -182,6 +203,7 @@ The source in this repository is released under the [MIT License](LICENSE). The 
 ## Credits
 
 - [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) by TGP482, the recompiler and runtime this is built on.
+- [LLVM](https://llvm.org) for Clang and LLD, which releases bundle to build the game code on the player's PC.
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) for the overridable function layout and instruction hooks.
 - [Zydis](https://github.com/zyantific/zydis) for decoding x86 instructions, [toml++](https://github.com/marzer/tomlplusplus) for the configs, [Dear ImGui](https://github.com/ocornut/imgui) for the settings overlay and [SDL](https://github.com/libsdl-org/SDL) for the window, input and controllers.
 - [xemu](https://github.com/xemu-project/xemu) and [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) as references for the Xbox's hardware and API behaviour.

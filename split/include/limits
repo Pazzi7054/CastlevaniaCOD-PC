@@ -1,0 +1,22 @@
+// Freestanding <limits>: integer and floating point ranges
+#pragma once
+namespace std {
+template <typename T>
+struct numeric_limits {
+    static constexpr bool is_signed = T(-1) < T(0);
+    static constexpr T min() {
+        if constexpr (__is_floating_point(T)) return sizeof(T) == 4 ? T(__FLT_MIN__) : T(__DBL_MIN__);
+        else return is_signed ? T(T(1) << (sizeof(T) * 8 - 1)) : T(0);
+    }
+    static constexpr T max() {
+        if constexpr (__is_floating_point(T)) return sizeof(T) == 4 ? T(__FLT_MAX__) : T(__DBL_MAX__);
+        else return is_signed ? T(~min()) : T(~T(0));
+    }
+    static constexpr T lowest() {
+        if constexpr (__is_floating_point(T)) return -max();
+        else return min();
+    }
+    static constexpr T infinity() { return T(__builtin_huge_val()); }
+    static constexpr T quiet_NaN() { return T(__builtin_nan("")); }
+};
+}  // namespace std

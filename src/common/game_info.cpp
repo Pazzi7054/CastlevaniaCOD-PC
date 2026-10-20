@@ -9,7 +9,7 @@ extern bool g_fps_counter;                    // menu.cpp
 extern bool g_pause_on_focus_loss;            // menu.cpp
 extern uint32_t g_menu_key;                   // menu.cpp
 extern bool g_launcher_keep_open;             // menu.cpp
-void WidescreenInit();                        // widescreen.cpp
+void GameInit();                              // setup.cpp
 
 // what the runtime asks of the game; strings must be set, hooks may stay null
 const app::GameInfo app::kGame = {
@@ -27,7 +27,7 @@ const app::GameInfo app::kGame = {
                 {"launcher_keep_open", &g_launcher_keep_open, nullptr}},
     .load = nullptr,                      // reads more from the settings file's toml::table
     .save = nullptr,                      // writes more into it
-    .init = WidescreenInit,               // after the settings load, before the window and boot: the renderer extension
+    .init = GameInit,                     // after the settings load, before the window and boot: game files, game code, renderer extension
     .loaded = nullptr,                    // image in memory, before its entry point runs
     .window = KeyboardWindow,             // the game window is up: keyboard focus and the menu's font
     .message = MenuMessage,               // window messages first; true takes one: F10 for the menu

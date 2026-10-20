@@ -1,0 +1,82 @@
+// Freestanding <cmath>: the compiler's builtins; what is not inlined is called in ucrtbase.dll
+#pragma once
+#define FP_NAN 2
+#define FP_INFINITE 1
+#define FP_ZERO 0
+#define FP_SUBNORMAL (-2)
+#define FP_NORMAL (-1)
+#define INFINITY __builtin_inff()
+#define NAN __builtin_nanf("")
+#define HUGE_VAL __builtin_huge_val()
+extern "C" {
+double sin(double);
+double cos(double);
+double tan(double);
+double asin(double);
+double acos(double);
+double atan(double);
+double atan2(double, double);
+double sqrt(double);
+double fmod(double, double);
+double log(double);
+double log2(double);
+double log10(double);
+double exp(double);
+double exp2(double);
+double pow(double, double);
+double ldexp(double, int);
+double frexp(double, int*);
+double floor(double);
+double ceil(double);
+double trunc(double);
+double fabs(double);
+double nearbyint(double);
+double rint(double);
+double round(double);
+}
+namespace std {
+#define CV_MATH1(name)                                                 \
+    inline double name(double x) { return __builtin_##name(x); }      \
+    inline float name(float x) { return __builtin_##name##f(x); }
+#define CV_MATH2(name)                                                                  \
+    inline double name(double x, double y) { return __builtin_##name(x, y); }          \
+    inline float name(float x, float y) { return __builtin_##name##f(x, y); }
+CV_MATH1(sin)
+CV_MATH1(cos)
+CV_MATH1(tan)
+CV_MATH1(asin)
+CV_MATH1(acos)
+CV_MATH1(atan)
+CV_MATH1(sqrt)
+CV_MATH1(log)
+CV_MATH1(log2)
+CV_MATH1(log10)
+CV_MATH1(exp)
+CV_MATH1(exp2)
+CV_MATH1(floor)
+CV_MATH1(ceil)
+CV_MATH1(trunc)
+CV_MATH1(fabs)
+CV_MATH1(nearbyint)
+CV_MATH1(rint)
+CV_MATH1(round)
+CV_MATH2(atan2)
+CV_MATH2(fmod)
+CV_MATH2(pow)
+#undef CV_MATH1
+#undef CV_MATH2
+inline double ldexp(double x, int e) { return __builtin_ldexp(x, e); }
+inline float ldexp(float x, int e) { return __builtin_ldexpf(x, e); }
+inline double frexp(double x, int* e) { return __builtin_frexp(x, e); }
+inline float frexp(float x, int* e) { return __builtin_frexpf(x, e); }
+template <typename T>
+inline bool isnan(T x) { return __builtin_isnan(x); }
+template <typename T>
+inline bool isinf(T x) { return __builtin_isinf(x); }
+template <typename T>
+inline bool isfinite(T x) { return __builtin_isfinite(x); }
+template <typename T>
+inline bool signbit(T x) { return __builtin_signbit(x); }
+template <typename T>
+inline int fpclassify(T x) { return __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL, FP_ZERO, x); }
+}  // namespace std

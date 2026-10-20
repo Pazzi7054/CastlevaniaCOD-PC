@@ -35,8 +35,31 @@ if(NOT GAME_PARTITIONS)
     set(GAME_PARTITIONS 8)
 endif()
 
-# target name = GAME_EXE in build.bat, xbe = GAME_XBE
-add_xbe_image(Castlevania default.xbe game.toml ${GAME_PARTITIONS} game)
+# A release (release.ps1) builds Castlevania.exe without the game code: the runtime, the host code and the exe's side
+# of the split that split/glue.py wrote, the game code coming from CastlevaniaGame.dll, which the player's PC builds
+# on the first start (src/common/setup.cpp). The generated folder is still read for image_symbols.h, the image's
+# addresses, which the runtime is compiled with.
+option(CV_SPLIT "Castlevania.exe without the game code, for a release" OFF)
+if(CV_SPLIT)
+    set(GEN ${CMAKE_CURRENT_SOURCE_DIR}/generated/game)
+    set(GLUE ${CMAKE_CURRENT_SOURCE_DIR}/out/split-glue)
+    file(GLOB GAME_SOURCES CONFIGURE_DEPENDS src/game/*.cpp)
+    set(xbe_file ${CMAKE_CURRENT_SOURCE_DIR}/assets/default.xbe)
+    file(SHA1 ${xbe_file} xbe_sha1)
+    file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/Castlevania_xbe.cpp CONTENT "extern const char kImageSha1[] = \"${xbe_sha1}\";
+")
+    add_executable(Castlevania WIN32 ${XBE_RUNTIME_SOURCES} ${XBE_HOST_SOURCES} ${GAME_SOURCES} ${XBE_IMGUI_SOURCES}
+                   ${CMAKE_CURRENT_BINARY_DIR}/Castlevania_xbe.cpp ${GLUE}/host_glue.cpp)
+    target_include_directories(Castlevania PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XBE_SDK_DIR}/runtime ${GEN})
+    target_include_directories(Castlevania SYSTEM PRIVATE ${imgui_SOURCE_DIR})
+    target_compile_options(Castlevania PRIVATE -fno-strict-aliasing)
+    target_compile_definitions(Castlevania PRIVATE UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS CV_SPLIT)
+    target_link_libraries(Castlevania PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:SDL3::SDL3-static> d3d12 dxgi dxguid d3dcompiler xaudio2 ole32 windowscodecs dbghelp winmm dwmapi ws2_32)
+    target_link_options(Castlevania PRIVATE -fuse-ld=lld -g)
+else()
+    # target name = GAME_EXE in build.bat, xbe = GAME_XBE
+    add_xbe_image(Castlevania default.xbe game.toml ${GAME_PARTITIONS} game)
+endif()
 
 # the launcher beside it: game files check, settings, play; no game code, the xbe's SHA-1 add_xbe_image wrote
 add_executable(CastlevaniaLauncher WIN32

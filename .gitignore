@@ -40,3 +40,7 @@ build_log*.txt
 *.dll
 *.7z
 *.rar
+
+# release logs
+release_log.txt
+release_build_log.txt

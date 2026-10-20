@@ -1,0 +1,15 @@
+; what the game DLL calls in the Visual C++ runtime: memory, C++ exceptions
+LIBRARY vcruntime140.dll
+EXPORTS
+    memcpy
+    memmove
+    memset
+    memcmp
+    memchr
+    _CxxThrowException
+    __CxxFrameHandler3
+    __CxxFrameHandler4
+    __C_specific_handler
+    __std_terminate
+    __std_exception_copy
+    __std_exception_destroy
