@@ -134,7 +134,8 @@ Changes this game needed beyond the generated config:
   fixed-function stage with no texture that reads `D3DTA_TEXTURE` ends the stage cascade, as XDK D3D does (without it
   every single texture quad drew white); `XBE_VERBOSE` lets a release build log info lines; a `widescreen` setting;
   for renderer extensions, `ShaderHooks::Position` (HLSL after the vertex position is set), `Extension::Vertices`
-  (each draw's assembled vertices) and `gpu::ReadsConstant`.
+  (each draw's assembled vertices) and `gpu::ReadsConstant`; the DirectSound mixer plays every channel of a voice,
+  not only the first two (cutscene audio is a 5.1 stream with the voices in the centre channel, which was silent).
 - `src\common\menu.cpp`: the menu key's state is read every frame instead of waiting for its key messages, which an
   overlay or another program's hotkey can take first; the messages are still swallowed so F10 never puts the window
   in menu mode.

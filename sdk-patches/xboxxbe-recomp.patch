@@ -264,7 +264,7 @@ index cb38363..40af2dd 100644
  // a primitive between two begin/end writes with its vertices inline, any other method as a simple state.
  HLE_STDCALL(D3DDevice_BeginPush, 1) {
 diff --git a/runtime/xdk/dsound.cpp b/runtime/xdk/dsound.cpp
-index b54aa04..5c69dad 100644
+index b54aa04..142f8a5 100644
 --- a/runtime/xdk/dsound.cpp
 +++ b/runtime/xdk/dsound.cpp
 @@ -75,6 +75,27 @@ X86Func* Find(uint32_t guest);
@@ -295,6 +295,109 @@ index b54aa04..5c69dad 100644
  
  namespace {
  
+@@ -209,18 +230,23 @@ float StereoFold(uint32_t bin) {
+     return folded ? 0.707f : 1.0f;
+ }
+ 
++constexpr uint32_t kMaxChannels = 8;
++
+ // gain of voice channel c on host left and right. A hardware voice holds two channels and owns a run of slots,
+-// which alternate left and right.
+-void Levels(Voice& v, float g[2][2]) {
++// which alternate left and right: a 5.1 stream is three of them, front, centre and LFE, back.
++void Levels(Voice& v, float g[kMaxChannels][2]) {
+     static const uint8_t kFront[2] = {0, 1};
+     const uint8_t* bin = v.nbins ? v.bin : kFront;
+     uint32_t n = v.nbins ? v.nbins : 2, voices = (std::max<uint32_t>(v.channels, 1) - 1) / 2 + 1;
+     uint32_t per = std::max<uint32_t>(n / voices, 2), step = v.channels == 1 ? 1 : 2;
+     bool speakers = false;
+     for (uint32_t s = 0; s < n; s++) speakers |= bin[s] < 10 && bin[s] != 3;
+-    for (uint32_t c = 0; c < 2; c++) {
++    for (uint32_t c = 0; c < kMaxChannels; c++) {
+         g[c][0] = g[c][1] = 0;
+-        for (uint32_t s = c; c < v.channels && s < per && s < n; s += step) {
++        // the slots of channel c: its hardware voice's run, its own side of it
++        uint32_t first = v.channels == 1 ? 0 : (c / 2) * per + (c % 2);
++        uint32_t last = v.channels == 1 ? n : std::min(n, (c / 2 + 1) * per);
++        for (uint32_t s = first; c < v.channels && s < last; s += step) {
+             uint32_t b = bin[s];
+             if (speakers && (b == 3 || b > 9)) continue;  // sub and effect sends
+             float x = Db(v.bin_mb[b]) * v.volume * v.headroom * StereoFold(b);
+@@ -256,7 +282,7 @@ void Levels(Voice& v, float g[2][2]) {
+                       g_top[0] * g_front[1] - g_top[1] * g_front[0]};
+     float side = rel ? d[0] : d[0] * right[0] + d[1] * right[1] + d[2] * right[2];
+     float pan = dist > 1e-3f ? side / dist : 0.0f;
+-    for (int c = 0; c < 2; c++) {
++    for (uint32_t c = 0; c < kMaxChannels; c++) {
+         g[c][0] *= att * std::min(1.0f, 1.0f - pan);
+         g[c][1] *= att * std::min(1.0f, 1.0f + pan);
+     }
+@@ -273,13 +299,14 @@ void Render(float* out, uint32_t frames) {
+     std::lock_guard<std::recursive_mutex> lock(g_lock);
+     for (auto& [obj, v] : g_voices) {
+         if (v.paused || v.sync || (!v.stream && !v.playing)) continue;
+-        float g[2][2];
++        float g[kMaxChannels][2];
+         Levels(v, g);
++        uint32_t chans = std::min<uint32_t>(v.channels, kMaxChannels);
+         uint32_t base = v.data + v.play_start;
+         double step = double(v.freq ? v.freq : v.rate) / audio::kRate;
+         for (uint32_t i = 0; i < frames; i++) {
+             uint32_t f = uint32_t(v.pos);
+-            float a, b, a1, b1;  // this frame and the next, interpolated between
++            float s0[kMaxChannels], s1[kMaxChannels];  // this frame and the next, interpolated between
+             if (v.stream) {
+                 while (!v.packets.empty() && f >= FramesOf(v, v.packets.front().size)) {
+                     Packet pk = v.packets.front();
+@@ -295,17 +322,10 @@ void Render(float* out, uint32_t frames) {
+                     break;
+                 }
+                 Packet& pk = v.packets.front();
+-                a = Sample(v, pk.data, f, 0);
+-                b = Sample(v, pk.data, f, 1);
+-                if (f + 1 < FramesOf(v, pk.size)) {
+-                    a1 = Sample(v, pk.data, f + 1, 0);
+-                    b1 = Sample(v, pk.data, f + 1, 1);
+-                } else if (v.packets.size() > 1) {
+-                    a1 = Sample(v, v.packets[1].data, 0, 0);
+-                    b1 = Sample(v, v.packets[1].data, 0, 1);
+-                } else {
+-                    a1 = a;
+-                    b1 = b;
++                bool inside = f + 1 < FramesOf(v, pk.size), next = v.packets.size() > 1;
++                for (uint32_t c = 0; c < chans; c++) {
++                    s0[c] = Sample(v, pk.data, f, int(c));
++                    s1[c] = inside ? Sample(v, pk.data, f + 1, int(c)) : next ? Sample(v, v.packets[1].data, 0, int(c)) : s0[c];
+                 }
+             } else {
+                 uint32_t start = v.looping ? FramesOf(v, v.loop_start) : 0;
+@@ -320,17 +340,18 @@ void Render(float* out, uint32_t frames) {
+                     f = uint32_t(v.pos);
+                 }
+                 if (!v.data) break;
+-                a = Sample(v, base, f, 0);
+-                b = Sample(v, base, f, 1);
+                 uint32_t next = f + 1 < end ? f + 1 : v.looping ? start : f;
+-                a1 = Sample(v, base, next, 0);
+-                b1 = Sample(v, base, next, 1);
++                for (uint32_t c = 0; c < chans; c++) {
++                    s0[c] = Sample(v, base, f, int(c));
++                    s1[c] = Sample(v, base, next, int(c));
++                }
+             }
+             float t = float(v.pos - f);
+-            a += (a1 - a) * t;
+-            b += (b1 - b) * t;
+-            out[i * 2] += a * g[0][0] + b * g[1][0];
+-            out[i * 2 + 1] += a * g[0][1] + b * g[1][1];
++            for (uint32_t c = 0; c < chans; c++) {
++                float s = s0[c] + (s1[c] - s0[c]) * t;
++                out[i * 2] += s * g[c][0];
++                out[i * 2 + 1] += s * g[c][1];
++            }
+             v.pos += step;
+         }
+     }
 @@ -461,7 +482,9 @@ static void AuditExports() {
          SYM(CDirectSoundStream_SetFrequency), SYM(CDirectSoundStream_SetFilter), SYM(CDirectSoundStream_SetHeadroom),
          SYM(CDirectSoundStream_SetMixBinVolumes), SYM(CDirectSoundStream_SetMixBins), SYM(CDirectSoundStream_SetMaxDistance),
