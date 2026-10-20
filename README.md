@@ -40,7 +40,8 @@ PC from your own copy (see [Building](#building)).
 `CastlevaniaLauncher.exe` checks your game files (the USA `default.xbe` by its hash, or a disc image), adds a disc
 image to `assets` for you (a hard link on the same drive, otherwise a copy), and has every setting: display mode,
 resolution, v-sync, widescreen, render scale, anisotropic filtering with quick presets, FPS counter, pause on focus
-loss and the settings menu key. **Play** saves them and starts the game. Saves and logs are a click away.
+loss and the settings menu key. Changes are saved as you make them; **Play** starts the game. Saves and logs are a
+click away.
 
 ### Settings Menu
 Press **F10** in game for the settings menu, or click both sticks in (**L3 + R3**) on a controller. The key can be

@@ -62,7 +62,7 @@ void MakeTarget() {
 bool CreateDevice(HWND hwnd) {
     DXGI_SWAP_CHAIN_DESC sd{};
     sd.BufferCount = 2;
-    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;  // 10 bits: no bands in the gradients
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.OutputWindow = hwnd;
     sd.SampleDesc.Count = 1;
@@ -304,11 +304,136 @@ std::string KeyName(uint32_t vk) {
     return Utf8(name);
 }
 
+// the look: dark and flat, one crimson accent, Segoe UI with the Segoe Fluent icons, a sidebar of pages. Settings
+// save as they change.
+
+float g_scale = 1;
+ImFont* g_body = nullptr;   // Segoe UI 16, icons merged
+ImFont* g_small = nullptr;  // Segoe UI 13.5, descriptions
+ImFont* g_semi = nullptr;   // Segoe UI Semibold 16, icons merged
+ImFont* g_head = nullptr;   // Segoe UI Semibold 22, page titles
+ImFont* g_hero = nullptr;   // Segoe UI Bold 46, the title on the home page
+ImFont* g_heroSub = nullptr;
+ImFont* g_button = nullptr;  // Segoe UI Semibold 20, Play
+
+float S(float v) { return v * g_scale; }
+
+ImU32 Rgb(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a); }
+const ImU32 kBg = Rgb(13, 14, 18), kSide = Rgb(18, 19, 24), kCard = Rgb(24, 25, 31), kCardHi = Rgb(31, 33, 40);
+const ImU32 kLine = Rgb(42, 44, 53), kText = Rgb(236, 236, 241), kMuted = Rgb(140, 142, 154);
+const ImU32 kAccent = Rgb(224, 41, 74), kAccentHi = Rgb(255, 66, 98), kAccentLo = Rgb(176, 26, 54);
+const ImU32 kGreen = Rgb(60, 207, 145), kRed = Rgb(255, 92, 92), kAmber = Rgb(255, 184, 76);
+ImVec4 V(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
+
+ImVec2 operator+(ImVec2 a, ImVec2 b) { return {a.x + b.x, a.y + b.y}; }
+ImVec2 operator-(ImVec2 a, ImVec2 b) { return {a.x - b.x, a.y - b.y}; }
+
+// Segoe Fluent / MDL2 icons
+enum : uint32_t {
+    kIconHome = 0xE80F, kIconDisplay = 0xE7F4, kIconGraphics = 0xE790, kIconGame = 0xE713, kIconKeys = 0xE765,
+    kIconFolder = 0xE8B7, kIconPlay = 0xE768, kIconCheck = 0xE73E, kIconWarn = 0xE7BA, kIconAdd = 0xE710,
+    kIconRefresh = 0xE72C, kIconSave = 0xE74E, kIconLog = 0xE9F9, kIconReset = 0xE777, kIconChevron = 0xE76C,
+    kIconDisc = 0xE958,
+};
+const ImWchar kIconRanges[] = {0xE710, 0xE710, 0xE713, 0xE713, 0xE72C, 0xE72C, 0xE73E, 0xE73E, 0xE74E, 0xE74E,
+                               0xE765, 0xE765, 0xE768, 0xE768, 0xE76C, 0xE76C, 0xE777, 0xE777, 0xE790, 0xE790,
+                               0xE7BA, 0xE7BA, 0xE7F4, 0xE7F4, 0xE80F, 0xE80F, 0xE8B7, 0xE8B7, 0xE958, 0xE958,
+                               0xE9F9, 0xE9F9, 0};
+
+std::string Icon(uint32_t cp) {
+    char s[5] = {};
+    ImTextCharToUtf8(s, cp);
+    return s;
+}
+
+void Text(ImFont* f, ImU32 col, const char* s) {
+    ImGui::PushFont(f);
+    ImGui::PushStyleColor(ImGuiCol_Text, col);
+    ImGui::TextUnformatted(s);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+}
+
+void Wrapped(ImFont* f, ImU32 col, const char* s) {
+    ImGui::PushFont(f);
+    ImGui::PushStyleColor(ImGuiCol_Text, col);
+    ImGui::TextWrapped("%s", s);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+}
+
+// an animated 0..1 per id, easing toward on
+float Ease(ImGuiID id, bool on, float speed = 12) {
+    ImGuiStorage* st = ImGui::GetStateStorage();
+    float t = st->GetFloat(id, on ? 1.0f : 0.0f);
+    float dt = ImGui::GetIO().DeltaTime;
+    t += ((on ? 1.0f : 0.0f) - t) * std::min(1.0f, dt * speed);
+    st->SetFloat(id, t);
+    return t;
+}
+
+ImU32 Mix(ImU32 a, ImU32 b, float t) {
+    ImVec4 x = V(a), y = V(b);
+    return ImGui::ColorConvertFloat4ToU32({x.x + (y.x - x.x) * t, x.y + (y.y - x.y) * t, x.z + (y.z - x.z) * t, x.w + (y.w - x.w) * t});
+}
+
+// an on/off switch; true when flipped
+bool Toggle(const char* id, bool& v) {
+    ImVec2 size{S(42), S(22)};
+    ImVec2 a = ImGui::GetCursorScreenPos();
+    bool pressed = ImGui::InvisibleButton(id, size);
+    if (pressed) v = !v;
+    float t = Ease(ImGui::GetItemID(), v);
+    bool hover = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    float r = size.y * 0.5f;
+    dl->AddRectFilled(a, a + size, Mix(hover ? Rgb(58, 60, 70) : Rgb(46, 48, 57), hover ? kAccentHi : kAccent, t), r);
+    dl->AddCircleFilled({a.x + r + t * (size.x - 2 * r), a.y + r}, r - S(3.5f), kText, 24);
+    return pressed;
+}
+
+// joined buttons, one chosen
+template <typename T>
+bool Segmented(const char* id, T& value, const std::vector<T>& values, const std::vector<std::string>& names) {
+    ImGui::PushID(id);
+    ImGui::PushFont(g_semi);
+    float avail = ImGui::GetContentRegionAvail().x;
+    float h = S(32), w = avail / float(values.size());
+    ImVec2 a = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(a, a + ImVec2(avail, h), Rgb(16, 17, 22), S(7));
+    dl->AddRect(a, a + ImVec2(avail, h), kLine, S(7));
+    bool changed = false;
+    for (size_t i = 0; i < values.size(); i++) {
+        ImVec2 p{a.x + w * float(i), a.y};
+        ImGui::SetCursorScreenPos(p);
+        ImGui::PushID(int(i));
+        if (ImGui::InvisibleButton("seg", {w, h}) && !(values[i] == value)) {
+            value = values[i];
+            changed = true;
+        }
+        bool on = values[i] == value, hover = ImGui::IsItemHovered();
+        float t = Ease(ImGui::GetItemID(), on, 16);
+        ImVec2 in{S(3), S(3)};
+        if (t > 0.01f) dl->AddRectFilled(p + in, p + ImVec2(w, h) - in, Mix(kCard, kAccent, t), S(5));
+        else if (hover) dl->AddRectFilled(p + in, p + ImVec2(w, h) - in, kCardHi, S(5));
+        ImVec2 ts = ImGui::CalcTextSize(names[i].c_str());
+        dl->AddText(p + ImVec2((w - ts.x) * 0.5f, (h - ts.y) * 0.5f), on ? kText : (hover ? kText : kMuted), names[i].c_str());
+        ImGui::PopID();
+    }
+    ImGui::SetCursorScreenPos(a);
+    ImGui::Dummy({avail, h});
+    ImGui::PopFont();
+    ImGui::PopID();
+    return changed;
+}
+
 template <typename T>
 void Combo(const char* id, T& value, const std::vector<T>& values, const std::vector<std::string>& names) {
     size_t cur = 0;
     for (size_t i = 0; i < values.size(); i++)
         if (values[i] == value) cur = i;
+    ImGui::SetNextItemWidth(-FLT_MIN);
     if (ImGui::BeginCombo(id, names[cur].c_str())) {
         for (size_t i = 0; i < values.size(); i++) {
             if (ImGui::Selectable(names[i].c_str(), i == cur)) value = values[i];
@@ -318,302 +443,219 @@ void Combo(const char* id, T& value, const std::vector<T>& values, const std::ve
     }
 }
 
-void Row(const char* name, const char* help) {
-    ImGui::TableNextRow();
-    ImGui::TableNextColumn();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(name);
-    if (help) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::IsItemHovered()) {
-            ImGui::BeginTooltip();
-            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24);
-            ImGui::TextUnformatted(help);
-            ImGui::PopTextWrapPos();
-            ImGui::EndTooltip();
-        }
-    }
-    ImGui::TableNextColumn();
-    ImGui::SetNextItemWidth(-FLT_MIN);
-}
+enum class Kind { Primary, Secondary, Ghost };
 
-bool BeginRows(const char* id) {
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
-    ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.45f);
-    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
-    return true;
-}
-
-// the look: the PS2 games' menus. Navy panels in pale blue and gold rules, orange to crimson brush banners over the
-// sections, bronze bars for buttons, Palatino, and a castle under the moon in the mist. All drawn here, no game art.
-
-float g_scale = 1;
-ImFont* g_body = nullptr;    // Palatino
-ImFont* g_strong = nullptr;  // Palatino bold, buttons
-ImFont* g_banner = nullptr;  // Georgia bold italic, section banners
-ImFont* g_title = nullptr;   // Palatino bold, the logo
-ImFont* g_sub = nullptr;     // Palatino bold italic, the logo's second line
-ImFont* g_play = nullptr;
-
-float S(float v) { return v * g_scale; }
-
-ImU32 Rgb(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a); }
-const ImU32 kNavyTop = Rgb(22, 36, 79, 236), kNavyBottom = Rgb(9, 16, 44, 236);
-const ImU32 kSteel = Rgb(143, 182, 216), kSteelDim = Rgb(70, 98, 140);
-const ImU32 kGoldHi = Rgb(250, 226, 150), kGoldC = Rgb(201, 162, 74), kGoldLo = Rgb(122, 86, 30);
-const ImU32 kCrimson = Rgb(179, 18, 42), kOrange = Rgb(240, 134, 30), kBlood = Rgb(70, 6, 14);
-const ImU32 kBronzeTop = Rgb(122, 74, 34), kBronzeBottom = Rgb(52, 28, 12);
-const ImU32 kParchment = Rgb(232, 220, 192);
-const ImVec4 kGold{0.98f, 0.86f, 0.55f, 1};
-const ImVec4 kGood{0.56f, 0.82f, 0.70f, 1};
-const ImVec4 kBad{0.90f, 0.32f, 0.26f, 1};
-const ImVec4 kDim{0.62f, 0.60f, 0.56f, 1};
-
-ImVec2 operator+(ImVec2 a, ImVec2 b) { return {a.x + b.x, a.y + b.y}; }
-ImVec2 operator-(ImVec2 a, ImVec2 b) { return {a.x - b.x, a.y - b.y}; }
-
-// text with a shadow, coloured top to bottom
-void ShadedText(ImDrawList* dl, ImFont* f, ImVec2 p, const char* s, ImU32 top, ImU32 bottom, float shadow = 2) {
-    float size = f->FontSize;
-    dl->AddText(f, size, p + ImVec2(S(shadow), S(shadow) * 1.3f), Rgb(0, 0, 0, 210), s);
-    int v0 = dl->VtxBuffer.Size;
-    dl->AddText(f, size, p, IM_COL32_WHITE, s);
-    ImVec2 sz = f->CalcTextSizeA(size, FLT_MAX, 0, s);
-    ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, v0, dl->VtxBuffer.Size, p, p + ImVec2(0, sz.y), top, bottom);
-}
-
-void Diamond(ImDrawList* dl, ImVec2 c, float r, ImU32 fill, ImU32 edge) {
-    ImVec2 pts[4] = {{c.x, c.y - r}, {c.x + r, c.y}, {c.x, c.y + r}, {c.x - r, c.y}};
-    dl->AddConvexPolyFilled(pts, 4, fill);
-    dl->AddPolyline(pts, 4, edge, ImDrawFlags_Closed, S(1));
-}
-
-// pale blue rule inside a gold one, a gem on each corner
-void Frame(ImDrawList* dl, ImVec2 a, ImVec2 b, bool gems = true) {
-    dl->AddRect(a, b, kGoldLo, 0, 0, S(3));
-    dl->AddRect(a, b, kGoldC, 0, 0, S(1));
-    float i = S(4);
-    dl->AddRect(a + ImVec2(i, i), b - ImVec2(i, i), kSteelDim, 0, 0, S(1));
-    if (!gems) return;
-    for (ImVec2 c : {a, ImVec2(b.x, a.y), b, ImVec2(a.x, b.y)}) Diamond(dl, c, S(5), kCrimson, kGoldHi);
-}
-
-// a panel: navy fill and frame behind the child's contents
-bool BeginPanel(const char* id, ImVec2 size) {
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, 0);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {S(18), S(16)});
-    bool open = ImGui::BeginChild(id, size, ImGuiChildFlags_AlwaysUseWindowPadding);
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 a = ImGui::GetWindowPos(), b = a + ImGui::GetWindowSize();
-    dl->PushClipRectFullScreen();
-    dl->AddRectFilledMultiColor(a, b, kNavyTop, kNavyTop, kNavyBottom, kNavyBottom);
-    Frame(dl, a, b);
-    dl->PopClipRect();
-    return open;
-}
-
-// the brush banner the games put over a menu: orange into crimson, trailing off to the right
-void Banner(const char* text) {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 p = ImGui::GetCursorScreenPos();
-    ImVec2 ts = g_banner->CalcTextSizeA(g_banner->FontSize, FLT_MAX, 0, text);
-    float h = ts.y + S(8), w = std::min(ts.x + S(90), ImGui::GetContentRegionAvail().x);
-    float skew = S(8), solid = w * 0.55f;
-    // a slanted solid head, orange into crimson, then the stroke fading out, a darker streak through it like a brush
-    ImVec2 q[4] = {{p.x + skew, p.y}, {p.x + solid, p.y}, {p.x + solid, p.y + h}, {p.x, p.y + h}};
-    int v0 = dl->VtxBuffer.Size;
-    dl->AddConvexPolyFilled(q, 4, IM_COL32_WHITE);
-    ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, v0, dl->VtxBuffer.Size, p, p + ImVec2(solid, 0), kOrange, kCrimson);
-    dl->AddRectFilledMultiColor({p.x + solid, p.y}, {p.x + w, p.y + h}, kCrimson, Rgb(179, 18, 42, 0),
-                                Rgb(179, 18, 42, 0), kCrimson);
-    dl->AddLine({p.x, p.y + h * 0.7f}, {p.x + w * 0.6f, p.y + h * 0.66f}, Rgb(120, 10, 24, 90), S(3));
-    dl->AddLine({p.x + S(4), p.y + h + S(2)}, {p.x + w * 0.85f, p.y + h + S(2)}, Rgb(250, 226, 150, 150), S(1));
-    ShadedText(dl, g_banner, p + ImVec2(S(14), S(3)), text, IM_COL32_WHITE, Rgb(255, 228, 200), 1.5f);
-    ImGui::Dummy({w, h + S(8)});
-}
-
-// the games' menu cursor: a gem pointing at the choice
-void Pointer(ImDrawList* dl, ImVec2 tip) {
-    float r = S(7);
-    ImVec2 pts[3] = {{tip.x, tip.y}, {tip.x - r * 1.8f, tip.y - r}, {tip.x - r * 1.8f, tip.y + r}};
-    dl->AddTriangleFilled(pts[0], pts[1], pts[2], Rgb(60, 170, 150));
-    dl->AddTriangle(pts[0], pts[1], pts[2], kGoldHi, S(1));
-    Diamond(dl, {tip.x - r * 2.4f, tip.y}, S(3), kGoldC, kGoldHi);
-}
-
-// a bronze bar with gold edges; crimson for the big one
-bool GothicButton(const char* label, ImVec2 size, bool play = false) {
-    ImFont* f = play ? g_play : g_strong;
-    ImVec2 ts = f->CalcTextSizeA(f->FontSize, FLT_MAX, 0, label);
-    if (size.x <= 0) size.x = size.x < 0 ? ImGui::GetContentRegionAvail().x : ts.x + S(36);
-    if (size.y <= 0) size.y = ts.y + S(12);
-    ImVec2 a = ImGui::GetCursorScreenPos(), b = a + size;
+bool Button(const char* label, ImVec2 size, Kind kind = Kind::Secondary, uint32_t icon = 0, ImFont* font = nullptr) {
+    font = font ? font : g_semi;
+    std::string text = icon ? Icon(icon) + "   " + label : label;
+    ImVec2 ts = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0, text.c_str());
+    if (size.x == 0) size.x = ts.x + S(32);
+    if (size.x < 0) size.x = ImGui::GetContentRegionAvail().x;
+    if (size.y == 0) size.y = S(38);
+    ImVec2 a = ImGui::GetCursorScreenPos();
     bool pressed = ImGui::InvisibleButton(label, size);
-    bool hover = ImGui::IsItemHovered(), held = ImGui::IsItemActive();
     bool disabled = ImGui::GetItemFlags() & ImGuiItemFlags_Disabled;
+    float hv = Ease(ImGui::GetItemID(), ImGui::IsItemHovered() && !disabled, 14);
+    bool held = ImGui::IsItemActive();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImU32 top = play ? Rgb(176, 24, 40) : kBronzeTop, bottom = play ? kBlood : kBronzeBottom;
-    if (hover && !disabled) top = play ? Rgb(214, 40, 56) : Rgb(156, 98, 46);
-    if (held) std::swap(top, bottom);
-    dl->AddRectFilledMultiColor(a, b, top, top, bottom, bottom);
-    // a sheen along the top
-    dl->AddRectFilledMultiColor(a, {b.x, a.y + size.y * 0.45f}, Rgb(255, 230, 180, 40), Rgb(255, 230, 180, 40), 0, 0);
-    if (play) {
-        // breathes while it waits
-        float pulse = 0.5f + 0.5f * std::sin(float(ImGui::GetTime()) * 2.4f);
-        for (int i = 1; i <= 3; i++)
-            dl->AddRect(a - ImVec2(S(i * 2.0f), S(i * 2.0f)), b + ImVec2(S(i * 2.0f), S(i * 2.0f)),
-                        Rgb(250, 200, 120, int((disabled ? 0 : 60 * pulse) / i)), 0, 0, S(2));
-        Frame(dl, a, b);
-    } else {
-        dl->AddRect(a, b, hover && !disabled ? kGoldHi : kGoldC, 0, 0, S(1.2f));
-        dl->AddRect(a + ImVec2(S(3), S(3)), b - ImVec2(S(3), S(3)), Rgb(0, 0, 0, 90), 0, 0, S(1));
+    float r = S(8);
+    ImU32 fill, text_col = kText;
+    switch (kind) {
+        case Kind::Primary: fill = Mix(kAccent, kAccentHi, hv); break;
+        case Kind::Secondary: fill = Mix(kCardHi, Rgb(44, 46, 56), hv); break;
+        default: fill = Mix(Rgb(0, 0, 0, 0), kCardHi, hv); text_col = Mix(kMuted, kText, hv); break;
     }
-    ImVec2 tp = a + ImVec2((size.x - ts.x) * 0.5f, (size.y - ts.y) * 0.5f);
-    if (play) ShadedText(dl, f, tp, label, kGoldHi, Rgb(214, 160, 70), 2);
-    else ShadedText(dl, f, tp, label, kParchment, Rgb(214, 196, 160), 1.5f);
-    if (disabled) dl->AddRectFilled(a, b, Rgb(5, 6, 14, 140));
-    if (hover && !disabled) Pointer(dl, {a.x - S(4), a.y + size.y * 0.5f});
+    if (held) fill = kind == Kind::Primary ? kAccentLo : kCard;
+    if (disabled) {
+        fill = kind == Kind::Ghost ? 0 : Rgb(36, 37, 44);
+        text_col = Rgb(90, 92, 102);
+    }
+    if (kind == Kind::Primary && !disabled) {
+        // a soft glow under the main action
+        for (int i = 1; i <= 4; i++)
+            dl->AddRectFilled(a + ImVec2(-S(i * 1.5f), S(i * 1.2f)), a + size + ImVec2(S(i * 1.5f), S(i * 2.5f)),
+                              Rgb(224, 41, 74, int((10 + 14 * hv) / i)), r + S(i * 2.0f));
+    }
+    dl->AddRectFilled(a, a + size, fill, r);
+    if (kind == Kind::Secondary) dl->AddRect(a, a + size, Mix(kLine, Rgb(70, 72, 84), hv), r);
+    dl->AddText(font, font->FontSize, a + ImVec2((size.x - ts.x) * 0.5f, (size.y - ts.y) * 0.5f), text_col, text.c_str());
     return pressed && !disabled;
 }
 
-// a tab: the brush banner when chosen, a navy plate when not
-bool GothicTab(const char* label, bool selected) {
-    ImVec2 ts = g_strong->CalcTextSizeA(g_strong->FontSize, FLT_MAX, 0, label);
-    ImVec2 size{ts.x + S(34), ts.y + S(12)};
-    ImVec2 a = ImGui::GetCursorScreenPos(), b = a + size;
-    bool pressed = ImGui::InvisibleButton(label, size);
-    bool hover = ImGui::IsItemHovered();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (selected) {
-        dl->AddRectFilledMultiColor(a, b, kOrange, kCrimson, kCrimson, kOrange);
-        dl->AddRect(a, b, kGoldHi, 0, 0, S(1.2f));
-    } else {
-        ImU32 t = hover ? Rgb(40, 60, 112) : Rgb(20, 32, 70);
-        dl->AddRectFilledMultiColor(a, b, t, t, kNavyBottom, kNavyBottom);
-        dl->AddRect(a, b, hover ? kSteel : kSteelDim, 0, 0, S(1));
+// a rounded card; its contents laid out inside
+void BeginCard(const char* id) {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, V(kCard));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(10));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {S(20), S(16)});
+    ImGui::BeginChild(id, {0, 0}, ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_Border);
+}
+void EndCard() {
+    ImGui::EndChild();
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+    ImGui::Dummy({0, S(4)});
+}
+
+// a setting: title and description at the left, its control in the column at the right
+bool BeginSetting(const char* title, const char* desc, bool first = false) {
+    if (!first) {
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float w = ImGui::GetContentRegionAvail().x;
+        ImGui::GetWindowDrawList()->AddLine({p.x, p.y}, {p.x + w, p.y}, kLine);
+        ImGui::Dummy({0, S(6)});
     }
-    ShadedText(dl, g_strong, a + ImVec2(S(17), S(6)), label, selected ? IM_COL32_WHITE : kParchment,
-               selected ? Rgb(255, 230, 200) : Rgb(190, 180, 160), 1.5f);
-    ImGui::SameLine(0, S(6));
+    float control = S(300);
+    float w = ImGui::GetContentRegionAvail().x - control - S(24);
+    ImGui::BeginGroup();
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w);
+    Text(g_semi, kText, title);
+    if (desc) Wrapped(g_small, kMuted, desc);
+    ImGui::PopTextWrapPos();
+    ImGui::EndGroup();
+    float text_h = ImGui::GetItemRectSize().y;
+    ImGui::SameLine(ImGui::GetContentRegionMax().x - control);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::max(0.0f, (text_h - S(32)) * 0.5f));
+    ImGui::BeginGroup();
+    return true;
+}
+void EndSetting() {
+    ImGui::EndGroup();
+    ImGui::Dummy({0, S(4)});
+}
+
+// a switch at the right end of the control column
+void ToggleRight(const char* id, bool& v) {
+    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - S(42));
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + S(5));
+    Toggle(id, v);
+}
+
+void PageTitle(const char* title, const char* desc) {
+    Text(g_head, kText, title);
+    if (desc) Wrapped(g_body, kMuted, desc);
+    ImGui::Dummy({0, S(10)});
+}
+
+// a sidebar entry: icon and label, the chosen one with an accent bar
+bool NavItem(uint32_t icon, const char* label, bool selected) {
+    ImVec2 size{ImGui::GetContentRegionAvail().x, S(40)};
+    ImVec2 a = ImGui::GetCursorScreenPos();
+    bool pressed = ImGui::InvisibleButton(label, size);
+    float hv = Ease(ImGui::GetItemID(), ImGui::IsItemHovered(), 14);
+    float on = Ease(ImGui::GetItemID() + 1, selected, 14);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (on > 0.01f || hv > 0.01f) dl->AddRectFilled(a, a + size, Rgb(255, 255, 255, int(8 * hv + 10 * on)), S(7));
+    if (on > 0.01f) {
+        float bar = S(16) * on;
+        dl->AddRectFilled({a.x, a.y + (size.y - bar) * 0.5f}, {a.x + S(3), a.y + (size.y + bar) * 0.5f}, kAccent, S(2));
+    }
+    ImU32 col = selected ? kText : Mix(kMuted, kText, hv);
+    std::string ic = Icon(icon);
+    float y = a.y + (size.y - g_semi->FontSize) * 0.5f;
+    dl->AddText(g_semi, g_semi->FontSize, {a.x + S(16), y + S(1)}, selected ? kAccentHi : col, ic.c_str());
+    dl->AddText(g_semi, g_semi->FontSize, {a.x + S(46), y}, col, label);
     return pressed;
 }
 
-// night sky, moon, the castle on its rock, mist and bats; behind everything
-void Backdrop(ImDrawList* dl, ImVec2 size, float t) {
-    dl->AddRectFilledMultiColor({0, 0}, size, Rgb(14, 22, 52), Rgb(14, 22, 52), Rgb(3, 4, 10), Rgb(3, 4, 10));
-    // moon and its glow, upper right
-    ImVec2 moon{size.x - S(150), S(64)};
-    for (int i = 6; i >= 1; i--) dl->AddCircleFilled(moon, S(30 + i * 10.0f), Rgb(150, 170, 210, 7));
-    dl->AddCircleFilled(moon, S(30), Rgb(226, 228, 210));
-    dl->AddCircleFilled(moon + ImVec2(S(9), S(-5)), S(7), Rgb(200, 202, 186));
-    dl->AddCircleFilled(moon + ImVec2(S(-10), S(8)), S(5), Rgb(206, 208, 192));
-    // the castle: towers with spires along the header's right side
-    struct Tower {
-        float x, w, h, spire;
-    };
-    static const Tower kTowers[] = {{-330, 26, 46, 22}, {-300, 18, 70, 30}, {-276, 40, 54, 0},   {-232, 22, 96, 44},
-                                    {-206, 30, 64, 18}, {-172, 16, 110, 52}, {-152, 46, 72, 0},  {-102, 20, 88, 36},
-                                    {-78, 34, 58, 20},  {-40, 14, 76, 30},   {-22, 30, 44, 14}};
-    float base = S(128);
-    ImU32 dark = Rgb(5, 7, 16);
-    dl->AddRectFilled({size.x - S(345), base - S(30)}, {size.x, base + S(4)}, dark);
-    for (const Tower& tw : kTowers) {
-        float x = size.x + S(tw.x), w = S(tw.w), top = base - S(tw.h);
-        dl->AddRectFilled({x, top}, {x + w, base}, dark);
-        if (tw.spire > 0) dl->AddTriangleFilled({x - S(3), top}, {x + w + S(3), top}, {x + w * 0.5f, top - S(tw.spire)}, dark);
-        else
-            for (float c = x; c < x + w - S(3); c += S(7)) dl->AddRectFilled({c, top - S(5)}, {c + S(4), top}, dark);
-        // a lit window or two
-        if (int(tw.h) % 3 == 0) dl->AddRectFilled({x + w * 0.4f, top + S(14)}, {x + w * 0.4f + S(3), top + S(20)}, Rgb(240, 170, 70, 200));
-    }
-    // mist drifting across
-    for (int i = 0; i < 6; i++) {
-        float y = size.y * (0.25f + 0.13f * i);
-        float x = std::fmod(t * (8.0f + i * 3) + i * 230.0f, size.x + S(600)) - S(300);
-        dl->AddCircleFilled({x, y}, S(140 + i * 25.0f), Rgb(110, 130, 170, 9), 48);
-        dl->AddCircleFilled({size.x - x, y + S(40)}, S(110 + i * 20.0f), Rgb(110, 130, 170, 7), 48);
-    }
-    // bats crossing the moon
-    for (int i = 0; i < 3; i++) {
-        float bt = t * (0.05f + 0.013f * i) + i * 0.37f;
-        float x = size.x - S(420) + std::fmod(bt, 1.0f) * S(440);
-        float y = S(40 + i * 18.0f) + std::sin(t * 1.7f + i) * S(6);
-        float flap = std::sin(t * 12 + i * 2) * S(3);
-        dl->AddTriangleFilled({x, y}, {x - S(9), y - S(3) + flap}, {x - S(4), y + S(2)}, dark);
-        dl->AddTriangleFilled({x, y}, {x + S(9), y - S(3) + flap}, {x + S(4), y + S(2)}, dark);
-    }
-    // the ornate band along the top
-    dl->AddRectFilledMultiColor({0, 0}, {size.x, S(10)}, Rgb(38, 110, 118), Rgb(38, 110, 118), Rgb(12, 44, 52), Rgb(12, 44, 52));
-    for (float x = S(10); x < size.x; x += S(22)) Diamond(dl, {x, S(5)}, S(3), Rgb(120, 200, 196, 160), Rgb(12, 44, 52));
-    dl->AddLine({0, S(10)}, {size.x, S(10)}, kGoldC, S(1));
-    // darker edges
-    ImU32 clear = 0, edge = Rgb(0, 0, 0, 150);
-    dl->AddRectFilledMultiColor({0, 0}, {S(80), size.y}, edge, clear, clear, edge);
-    dl->AddRectFilledMultiColor({size.x - S(80), 0}, size, clear, edge, edge, clear);
-    dl->AddRectFilledMultiColor({0, size.y - S(70)}, size, clear, clear, edge, edge);
+// a status line: coloured dot or icon and text
+void Status(uint32_t icon, ImU32 col, const std::string& text) {
+    ImGui::PushFont(g_semi);
+    ImGui::PushStyleColor(ImGuiCol_Text, col);
+    ImGui::TextUnformatted(Icon(icon).c_str());
+    ImGui::PopStyleColor();
+    ImGui::SameLine(0, S(10));
+    ImGui::TextUnformatted(text.c_str());
+    ImGui::PopFont();
+}
+
+// a keyboard key drawn as a keycap
+void Keycap(const char* key) {
+    ImGui::PushFont(g_semi);
+    ImVec2 ts = ImGui::CalcTextSize(key);
+    ImVec2 a = ImGui::GetCursorScreenPos();
+    ImVec2 size{ts.x + S(16), ts.y + S(6)};
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(a + ImVec2(0, S(2)), a + size + ImVec2(0, S(2)), Rgb(10, 10, 14), S(5));
+    dl->AddRectFilled(a, a + size, kCardHi, S(5));
+    dl->AddRect(a, a + size, kLine, S(5));
+    dl->AddText(a + ImVec2(S(8), S(3)), kText, key);
+    ImGui::Dummy(size + ImVec2(0, S(2)));
+    ImGui::PopFont();
 }
 
 void Style() {
     ImGuiStyle& st = ImGui::GetStyle();
     ImGui::StyleColorsDark(&st);
-    st.WindowRounding = st.ChildRounding = st.FrameRounding = st.PopupRounding = st.GrabRounding = 0;
+    st.WindowRounding = 0;
+    st.ChildRounding = 10;
+    st.FrameRounding = 7;
+    st.PopupRounding = 8;
+    st.GrabRounding = 7;
+    st.ScrollbarRounding = 8;
     st.WindowBorderSize = 0;
-    st.ChildBorderSize = 0;
+    st.ChildBorderSize = 1;
     st.FrameBorderSize = 1;
     st.PopupBorderSize = 1;
-    st.WindowPadding = {18, 14};
-    st.FramePadding = {10, 5};
-    st.ItemSpacing = {10, 9};
+    st.WindowPadding = {0, 0};
+    st.FramePadding = {12, 7};
+    st.ItemSpacing = {10, 8};
+    st.ScrollbarSize = 10;
     ImVec4* c = st.Colors;
-    auto v = [](ImU32 u) { return ImGui::ColorConvertU32ToFloat4(u); };
     c[ImGuiCol_WindowBg] = {0, 0, 0, 0};
-    c[ImGuiCol_Text] = v(kParchment);
-    c[ImGuiCol_TextDisabled] = kDim;
-    c[ImGuiCol_PopupBg] = v(Rgb(10, 18, 46, 250));
-    c[ImGuiCol_Border] = v(kSteelDim);
-    c[ImGuiCol_FrameBg] = v(Rgb(8, 13, 34, 230));
-    c[ImGuiCol_FrameBgHovered] = v(Rgb(26, 40, 86, 240));
-    c[ImGuiCol_FrameBgActive] = v(Rgb(36, 52, 104, 250));
-    c[ImGuiCol_Header] = v(Rgb(150, 20, 36));
-    c[ImGuiCol_HeaderHovered] = v(Rgb(190, 40, 52));
-    c[ImGuiCol_HeaderActive] = v(kCrimson);
-    c[ImGuiCol_Button] = v(kBronzeBottom);
-    c[ImGuiCol_ButtonHovered] = v(kBronzeTop);
-    c[ImGuiCol_ButtonActive] = v(kBronzeTop);
-    c[ImGuiCol_CheckMark] = kGold;
-    c[ImGuiCol_PlotHistogram] = v(kCrimson);
-    c[ImGuiCol_NavHighlight] = kGold;
-    c[ImGuiCol_Separator] = v(kGoldLo);
-    c[ImGuiCol_TableRowBg] = {0, 0, 0, 0};
-    c[ImGuiCol_TableRowBgAlt] = v(Rgb(255, 255, 255, 10));
-    c[ImGuiCol_TableBorderLight] = v(kSteelDim);
+    c[ImGuiCol_Text] = V(kText);
+    c[ImGuiCol_TextDisabled] = V(kMuted);
+    c[ImGuiCol_PopupBg] = V(Rgb(30, 31, 38, 252));
+    c[ImGuiCol_Border] = V(kLine);
+    c[ImGuiCol_FrameBg] = V(Rgb(16, 17, 22));
+    c[ImGuiCol_FrameBgHovered] = V(kCardHi);
+    c[ImGuiCol_FrameBgActive] = V(kCardHi);
+    c[ImGuiCol_Button] = V(kCardHi);
+    c[ImGuiCol_ButtonHovered] = V(Rgb(44, 46, 56));
+    c[ImGuiCol_ButtonActive] = V(kCard);
+    c[ImGuiCol_Header] = V(Rgb(224, 41, 74, 70));
+    c[ImGuiCol_HeaderHovered] = V(Rgb(255, 255, 255, 18));
+    c[ImGuiCol_HeaderActive] = V(Rgb(224, 41, 74, 110));
+    c[ImGuiCol_CheckMark] = V(kAccent);
+    c[ImGuiCol_PlotHistogram] = V(kAccent);
+    c[ImGuiCol_NavHighlight] = V(kAccentHi);
     c[ImGuiCol_ScrollbarBg] = {0, 0, 0, 0};
-    c[ImGuiCol_ScrollbarGrab] = v(kBronzeTop);
+    c[ImGuiCol_ScrollbarGrab] = V(Rgb(60, 62, 72));
+    c[ImGuiCol_ScrollbarGrabHovered] = V(Rgb(80, 82, 94));
+    c[ImGuiCol_TableRowBg] = {0, 0, 0, 0};
+    c[ImGuiCol_TableRowBgAlt] = {0, 0, 0, 0};
     st.ScaleAllSizes(g_scale);
 }
 
 void Fonts() {
     ImGuiIO& io = ImGui::GetIO();
-    auto load = [&](const char* file, float size, const char* fallback = nullptr) -> ImFont* {
-        std::string path = std::string("C:\\Windows\\Fonts\\") + file;
-        std::error_code ec;
-        if (!fs::exists(path, ec) && fallback) path = std::string("C:\\Windows\\Fonts\\") + fallback;
-        if (!fs::exists(path, ec)) return nullptr;
-        return io.Fonts->AddFontFromFileTTF(path.c_str(), size * g_scale);
+    std::error_code ec;
+    auto path = [&](std::initializer_list<const char*> names) -> std::string {
+        for (const char* n : names) {
+            std::string p = std::string("C:\\Windows\\Fonts\\") + n;
+            if (fs::exists(p, ec)) return p;
+        }
+        return {};
     };
-    g_body = load("pala.ttf", 19, "georgia.ttf");
-    if (!g_body) g_body = io.Fonts->AddFontDefault();
-    g_strong = load("palab.ttf", 19, "georgiab.ttf");
-    g_banner = load("georgiaz.ttf", 21, "palabi.ttf");
-    g_title = load("palab.ttf", 54, "georgiab.ttf");
-    g_sub = load("palabi.ttf", 27, "georgiaz.ttf");
-    g_play = load("palab.ttf", 30, "georgiab.ttf");
-    for (ImFont** f : {&g_strong, &g_banner, &g_title, &g_sub, &g_play})
-        if (!*f) *f = g_body;
+    std::string regular = path({"segoeui.ttf"}), semi = path({"seguisb.ttf", "segoeui.ttf"});
+    std::string bold = path({"segoeuib.ttf", "seguisb.ttf"}), icons = path({"SegoeIcons.ttf", "segmdl2.ttf"});
+    auto load = [&](const std::string& file, float size, bool with_icons) -> ImFont* {
+        if (file.empty()) return io.Fonts->AddFontDefault();
+        ImFont* f = io.Fonts->AddFontFromFileTTF(file.c_str(), size * g_scale);
+        if (with_icons && !icons.empty()) {
+            ImFontConfig cfg;
+            cfg.MergeMode = true;
+            cfg.GlyphOffset = {0, S(2)};
+            io.Fonts->AddFontFromFileTTF(icons.c_str(), size * g_scale, &cfg, kIconRanges);
+        }
+        return f;
+    };
+    g_body = load(regular, 16, true);
+    g_small = load(regular, 13.5f, false);
+    g_semi = load(semi, 16, true);
+    g_head = load(semi, 24, false);
+    g_hero = load(bold, 48, false);
+    g_heroSub = load(semi, 24, false);
+    g_button = load(semi, 20, true);
 }
 
 // the launcher's state and its one screen
@@ -621,6 +663,7 @@ class Launcher {
 public:
     Launcher() {
         settings_.Load();
+        saved_ = Snapshot();
         files_.Scan();
         modes_ = Resolutions();
     }
@@ -630,113 +673,199 @@ public:
         if (rescan_ && !import_.running) {
             rescan_ = false;
             files_.Scan();
-            if (!import_.result.empty()) status_ = import_.result;
+            if (!import_.result.empty()) Note(import_.result);
         }
         ImGuiIO& io = ImGui::GetIO();
-        Backdrop(ImGui::GetBackgroundDrawList(), io.DisplaySize, float(ImGui::GetTime()));
+        ImDrawList* bg = ImGui::GetBackgroundDrawList();
+        bg->AddRectFilled({0, 0}, io.DisplaySize, kBg);
         ImGui::SetNextWindowPos({0, 0});
         ImGui::SetNextWindowSize(io.DisplaySize);
         ImGui::Begin("launcher", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                          ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground);
-        Header();
-        float footer = S(78);
-        float left = ImGui::GetContentRegionAvail().x * 0.35f;
-        if (BeginPanel("files", {left, -footer})) GamePanel();
-        ImGui::EndChild();
-        ImGui::SameLine(0, S(16));
-        if (BeginPanel("settings", {0, -footer})) {
-            for (int i = 0; i < 4; i++) {
-                static const char* kTabs[] = {"Display", "Graphics", "Game", "Controls"};
-                if (GothicTab(kTabs[i], tab_ == i)) tab_ = i;
-            }
-            ImGui::NewLine();
-            ImGui::Dummy({0, S(4)});
-            switch (tab_) {
-                case 0: DisplayTab(); break;
-                case 1: GraphicsTab(); break;
-                case 2: GameTab(); break;
-                default: ControlsTab(); break;
-            }
+        bool keep = true;
+        Sidebar();
+        ImGui::SameLine(0, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {S(36), S(28)});
+        ImGui::BeginChild("page", {0, 0}, ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::PushFont(g_body);
+        switch (page_) {
+            case 0: keep = HomePage(); break;
+            case 1: DisplayPage(); break;
+            case 2: GraphicsPage(); break;
+            case 3: GamePage(); break;
+            case 4: ControlsPage(); break;
+            default: FilesPage(); break;
         }
+        ImGui::PopFont();
         ImGui::EndChild();
-        bool keep = Footer();
+        ImGui::PopStyleVar();
         ImGui::End();
+        AutoSave();
         return keep;
     }
 
 private:
-    void Header() {
+    // every setting the launcher shows, to see when one changed
+    std::string Snapshot() const {
+        const Settings& s = settings_;
+        return s.display_mode + "|" + std::to_string(s.width) + "x" + std::to_string(s.height) + "|" +
+               std::to_string(s.render_percent) + "|" + std::to_string(s.aniso) + "|" + std::to_string(s.vsync) +
+               std::to_string(s.widescreen) + std::to_string(s.fps_counter) + std::to_string(s.pause_on_focus_loss) +
+               std::to_string(s.keep_open) + "|" + std::to_string(s.menu_key);
+    }
+
+    void AutoSave() {
+        std::string now = Snapshot();
+        if (now == saved_) return;
+        saved_ = now;
+        Note(settings_.Save() ? "Settings saved" : "Could not write the settings file");
+    }
+
+    void Note(const std::string& s) {
+        status_ = s;
+        status_time_ = ImGui::GetTime();
+    }
+
+    void Sidebar() {
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImVec2 p = ImGui::GetCursorScreenPos() + ImVec2(S(4), S(4));
-        ShadedText(dl, g_title, p, "Castlevania", kGoldHi, Rgb(170, 110, 36), 3);
-        ImVec2 ts = g_title->CalcTextSizeA(g_title->FontSize, FLT_MAX, 0, "Castlevania");
-        ShadedText(dl, g_sub, p + ImVec2(ts.x * 0.42f, ts.y * 0.80f), "Curse of Darkness", Rgb(236, 70, 70),
-                   Rgb(140, 14, 28), 2);
-        ImGui::Dummy({ts.x, ts.y + g_sub->FontSize * 0.75f});
-        ImGui::PushFont(g_body);
-        ImGui::TextColored(kDim, "Native PC port of the original Xbox release");
+        ImVec2 a = ImGui::GetCursorScreenPos();
+        float w = S(232), h = ImGui::GetIO().DisplaySize.y;
+        dl->AddRectFilled(a, a + ImVec2(w, h), kSide);
+        dl->AddLine(a + ImVec2(w - 1, 0), a + ImVec2(w - 1, h), kLine);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {S(14), S(22)});
+        ImGui::BeginChild("side", {w, h}, ImGuiChildFlags_AlwaysUseWindowPadding);
+        // the wordmark
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + S(8));
+        ImGui::BeginGroup();
+        ImGui::PushFont(g_semi);
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddRectFilled(p + ImVec2(0, S(3)), p + ImVec2(S(4), S(37)), kAccent, S(2));
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + S(14));
+        ImGui::TextUnformatted("CASTLEVANIA");
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + S(14));
         ImGui::PopFont();
-        ImGui::Dummy({0, S(2)});
-    }
+        Text(g_small, kMuted, "Curse of Darkness  |  PC");
+        ImGui::EndGroup();
+        ImGui::Dummy({0, S(22)});
 
-    void GamePanel() {
-        Banner("Game Files");
-        if (files_.assets.empty()) {
-            ImGui::TextColored(kBad, "No assets folder found.");
-            ImGui::TextWrapped("Make an assets folder beside the game and put your game files in it.");
-        } else {
-            switch (files_.xbe) {
-                case Files::Xbe::Match: ImGui::TextColored(kGood, "default.xbe - USA release, ready"); break;
-                case Files::Xbe::Other:
-                    ImGui::TextColored(kBad, "default.xbe - another release");
-                    ImGui::TextWrapped("Only the USA (NTSC-U) release works with this build.");
-                    break;
-                case Files::Xbe::Missing: ImGui::TextColored(kDim, "default.xbe - not extracted"); break;
+        static const struct {
+            uint32_t icon;
+            const char* label;
+        } kPages[] = {{kIconHome, "Home"},     {kIconDisplay, "Display"},  {kIconGraphics, "Graphics"},
+                      {kIconGame, "Game"},     {kIconKeys, "Controls"},    {kIconFolder, "Game files"}};
+        for (int i = 0; i < 6; i++) {
+            if (i == 1) {
+                ImGui::Dummy({0, S(6)});
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + S(16));
+                Text(g_small, Rgb(100, 102, 114), "SETTINGS");
             }
-            for (const fs::path& iso : files_.isos) ImGui::TextColored(kGood, "Disc image - %s", Utf8(iso.filename().wstring()).c_str());
-            if (files_.xbe == Files::Xbe::Missing && files_.isos.empty())
-                ImGui::TextWrapped("Add your disc image (.iso), or extract the disc into the assets folder: default.xbe "
-                                   "with its data, movie and sound folders.");
+            if (i == 5) ImGui::Dummy({0, S(6)});
+            if (NavItem(kPages[i].icon, kPages[i].label, page_ == i)) page_ = i;
         }
-        if (!files_.exe) ImGui::TextColored(kBad, "Castlevania.exe is not beside the launcher.");
-        ImGui::Dummy({0, S(2)});
-        if (import_.running) ImGui::ProgressBar(import_.progress, {-FLT_MIN, 0}, "Copying disc image...");
-        else if (GothicButton("Add Disc Image", {-1, 0})) AddImage();
-        if (GothicButton("Open Assets Folder", {-1, 0})) {
-            fs::path a = files_.assets.empty() ? ExeDir() / "assets" : files_.assets;
-            std::error_code ec;
-            fs::create_directories(a, ec);
-            Open(a);
-            rescan_ = true;
-        }
-        if (GothicButton("Check Again", {-1, 0})) rescan_ = true;
 
-        ImGui::Dummy({0, S(6)});
-        Banner("Records");
-        float half = (ImGui::GetContentRegionAvail().x - S(10)) * 0.5f;
-        if (GothicButton("Saves", {half, 0})) {
-            fs::path s = ExeDir() / kSaves;
-            std::error_code ec;
-            Open(fs::exists(s, ec) ? s : ExeDir());
+        // at the bottom: the save note and a reset
+        float bottom = ImGui::GetWindowHeight() - S(96);
+        if (ImGui::GetCursorPosY() < bottom) ImGui::SetCursorPosY(bottom);
+        float age = float(ImGui::GetTime() - status_time_);
+        if (!status_.empty() && age < 4) {
+            float alpha = std::clamp(4 - age, 0.0f, 1.0f);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + S(16));
+            Text(g_small, Rgb(140, 142, 154, int(255 * alpha)), status_.c_str());
+        } else {
+            ImGui::Dummy({0, g_small->FontSize});
         }
-        ImGui::SameLine(0, S(10));
-        if (GothicButton("Logs", {half, 0})) {
-            std::error_code ec;
-            Open(fs::exists(ExeDir() / "logs", ec) ? ExeDir() / "logs" : ExeDir());
+        if (Button("Reset to defaults", {-1, S(36)}, Kind::Ghost, kIconReset)) {
+            settings_.Defaults();
+            Note("Defaults restored");
         }
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
     }
 
-    void DisplayTab() {
-        if (!BeginRows("display")) return;
-        Row("Display mode", "Borderless fills the monitor without changing its mode, and switches away instantly.");
-        Combo<std::string>("##mode", settings_.display_mode, {"fullscreen", "borderless", "windowed"},
-                           {"Fullscreen", "Borderless", "Windowed"});
-        Row("Resolution", "The output size. Fullscreen switches the monitor to it; borderless always fills the monitor.");
+    bool HomePage() {
+        // the hero: a dark panel lit crimson from the top right corner
+        float w = ImGui::GetContentRegionAvail().x, h = S(270);
+        ImVec2 a = ImGui::GetCursorScreenPos();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        int v0 = dl->VtxBuffer.Size;
+        dl->AddRectFilled(a, a + ImVec2(w, h), IM_COL32_WHITE, S(14));
+        ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, v0, dl->VtxBuffer.Size, a + ImVec2(w, 0), a + ImVec2(w * 0.35f, h),
+                                                      Rgb(104, 20, 42), Rgb(18, 17, 23));
+        dl->AddRect(a, a + ImVec2(w, h), Rgb(255, 255, 255, 14), S(14));
+
+        ImGui::SetCursorScreenPos(a + ImVec2(S(34), S(30)));
+        ImGui::BeginGroup();
+        Text(g_small, kAccentHi, "ORIGINAL XBOX  |  NATIVE PC PORT");
+        Text(g_hero, kText, "Castlevania");
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - S(10));
+        Text(g_heroSub, Rgb(200, 200, 210), "Curse of Darkness");
+        ImGui::Dummy({0, S(8)});
+        bool ready = files_.Playable();
+        if (ready) Status(kIconCheck, kGreen, "Ready to play");
+        else if (!files_.exe) Status(kIconWarn, kRed, "Castlevania.exe is missing");
+        else Status(kIconWarn, kAmber, "Game files needed");
+        ImGui::EndGroup();
+
+        ImGui::SetCursorScreenPos(a + ImVec2(S(34), h - S(30) - S(54)));
+        bool keep = true;
+        ImGui::BeginDisabled(!ready || import_.running);
+        if (Button("PLAY", {S(220), S(54)}, Kind::Primary, kIconPlay, g_button)) keep = Play();
+        ImGui::EndDisabled();
+        if (!ready) {
+            ImGui::SameLine(0, S(14));
+            if (Button("Set up game files", {0, S(54)}, Kind::Secondary, kIconFolder)) page_ = 5;
+        }
+        ImGui::SetCursorScreenPos(a + ImVec2(0, h + S(20)));
+
+        // what is set, at a glance; each opens its page
+        Text(g_semi, kMuted, "Current setup");
+        ImGui::Dummy({0, S(2)});
+        Res r{settings_.width, settings_.height};
+        std::string res = r.w ? std::to_string(r.w) + " x " + std::to_string(r.h) : "Desktop";
+        std::string mode = settings_.display_mode == "fullscreen" ? "Fullscreen" : settings_.display_mode == "windowed" ? "Windowed" : "Borderless";
+        struct Tile {
+            const char* label;
+            std::string value;
+            int page;
+        } tiles[] = {{"Display", mode + "  |  " + res, 1},
+                     {"Widescreen", settings_.widescreen ? "On (16:9, Hor+)" : "Off (4:3)", 2},
+                     {"Render scale", std::to_string(settings_.render_percent) + "%", 2},
+                     {"Menu key", KeyName(settings_.menu_key) + "  |  L3 + R3", 3}};
+        float gap = S(12), tw = (ImGui::GetContentRegionAvail().x - gap) / 2, th = S(68);
+        for (int i = 0; i < 4; i++) {
+            if (i % 2) ImGui::SameLine(0, gap);
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            ImGui::PushID(i);
+            if (ImGui::InvisibleButton("tile", {tw, th})) page_ = tiles[i].page;
+            float hv = Ease(ImGui::GetItemID(), ImGui::IsItemHovered(), 14);
+            ImGui::PopID();
+            dl->AddRectFilled(p, p + ImVec2(tw, th), Mix(kCard, kCardHi, hv), S(10));
+            dl->AddRect(p, p + ImVec2(tw, th), kLine, S(10));
+            dl->AddText(g_small, g_small->FontSize, p + ImVec2(S(18), S(14)), kMuted, tiles[i].label);
+            dl->AddText(g_semi, g_semi->FontSize, p + ImVec2(S(18), S(34)), kText, tiles[i].value.c_str());
+            std::string chev = Icon(kIconChevron);
+            dl->AddText(g_semi, g_semi->FontSize, p + ImVec2(tw - S(30), th * 0.5f - S(8)), Mix(kMuted, kText, hv), chev.c_str());
+        }
+        ImGui::Dummy({0, S(8)});
+        std::string tip = "In game, press " + KeyName(settings_.menu_key) + " or click both sticks (L3 + R3) for these settings.";
+        Wrapped(g_small, kMuted, tip.c_str());
+        return keep;
+    }
+
+    void DisplayPage() {
+        PageTitle("Display", "How the game window fills your screen.");
+        BeginCard("display");
+        BeginSetting("Display mode", "Borderless fills the monitor without changing its mode and switches away instantly.", true);
+        Segmented<std::string>("mode", settings_.display_mode, {"fullscreen", "borderless", "windowed"},
+                               {"Fullscreen", "Borderless", "Windowed"});
+        EndSetting();
+        BeginSetting("Resolution", "The output size. Fullscreen switches the monitor to it; borderless always fills the monitor.");
         {
             size_t cur = 0;
             for (size_t i = 0; i < modes_.size(); i++)
                 if (modes_[i].w == settings_.width && modes_[i].h == settings_.height) cur = i;
+            ImGui::SetNextItemWidth(-FLT_MIN);
             if (ImGui::BeginCombo("##res", ResName(modes_[cur]).c_str())) {
                 for (size_t i = 0; i < modes_.size(); i++)
                     if (ImGui::Selectable(ResName(modes_[i]).c_str(), i == cur)) {
@@ -746,47 +875,55 @@ private:
                 ImGui::EndCombo();
             }
         }
-        Row("V-Sync", "Off can tear, and lowers input latency a little. The game runs at 60 FPS either way.");
-        ImGui::Checkbox("##vsync", &settings_.vsync);
-        ImGui::EndTable();
+        EndSetting();
+        BeginSetting("V-Sync", "Off can tear and lowers input latency a little. The game runs at 60 FPS either way.");
+        ToggleRight("vsync", settings_.vsync);
+        EndSetting();
+        EndCard();
     }
 
-    void GraphicsTab() {
-        if (!BeginRows("graphics")) return;
-        Row("Widescreen", "16:9 with more of the world at the sides, nothing stretched. The HUD, menus and movies stay "
-                          "4:3 in the middle. Off shows the original 4:3 picture. Needs a 16:9 or wider resolution.");
-        ImGui::Checkbox("##wide", &settings_.widescreen);
-        Row("Render scale", "Of the output height. Above 100% supersamples for a sharper, smoother picture; below "
-                            "100% is faster on weak GPUs.");
-        Combo<uint32_t>("##scale", settings_.render_percent, {50, 75, 100, 150, 200},
-                        {"50%", "75%", "100% (native)", "150%", "200%"});
-        Row("Anisotropic filtering", "Sharper textures on floors and walls seen at an angle.");
-        Combo<uint32_t>("##aniso", settings_.aniso, {0, 2, 4, 8, 16}, {"Off (as the game asks)", "2x", "4x", "8x", "16x"});
-        ImGui::EndTable();
-        ImGui::Dummy({0, S(4)});
-        ImGui::TextColored(kDim, "Presets");
-        auto preset = [&](const char* name, uint32_t scale, uint32_t aniso) {
-            bool on = settings_.render_percent == scale && settings_.aniso == aniso;
-            if (GothicTab(name, on)) {
-                settings_.render_percent = scale;
-                settings_.aniso = aniso;
-            }
-        };
-        preset("Performance", 75, 0);
-        preset("Original", 100, 0);
-        preset("High", 150, 8);
-        preset("Ultra", 200, 16);
-        ImGui::NewLine();
+    void GraphicsPage() {
+        PageTitle("Graphics", "Picture quality and shape.");
+        BeginCard("presets");
+        BeginSetting("Quality preset", "Sets render scale and texture filtering together.", true);
+        int preset = settings_.render_percent == 75 && settings_.aniso == 0      ? 0
+                     : settings_.render_percent == 100 && settings_.aniso == 0   ? 1
+                     : settings_.render_percent == 150 && settings_.aniso == 8   ? 2
+                     : settings_.render_percent == 200 && settings_.aniso == 16  ? 3
+                                                                                 : -1;
+        if (Segmented<int>("preset", preset, {0, 1, 2, 3}, {"Low", "Original", "High", "Ultra"})) {
+            static const uint32_t kScale[] = {75, 100, 150, 200}, kAniso[] = {0, 0, 8, 16};
+            settings_.render_percent = kScale[preset];
+            settings_.aniso = kAniso[preset];
+        }
+        EndSetting();
+        EndCard();
+        BeginCard("graphics");
+        BeginSetting("Widescreen", "16:9 with more of the world at the sides, nothing stretched. The HUD, menus and "
+                                   "movies stay 4:3 in the middle. Needs a 16:9 or wider resolution.", true);
+        ToggleRight("wide", settings_.widescreen);
+        EndSetting();
+        BeginSetting("Render scale", "Of the output height. Above 100% supersamples for a sharper picture; below is "
+                                     "faster on weak GPUs.");
+        Segmented<uint32_t>("scale", settings_.render_percent, {50, 75, 100, 150, 200}, {"50%", "75%", "100%", "150%", "200%"});
+        EndSetting();
+        BeginSetting("Anisotropic filtering", "Sharper textures on floors and walls seen at an angle.");
+        Segmented<uint32_t>("aniso", settings_.aniso, {0, 2, 4, 8, 16}, {"Off", "2x", "4x", "8x", "16x"});
+        EndSetting();
+        EndCard();
     }
 
-    void GameTab() {
-        if (!BeginRows("game")) return;
-        Row("FPS counter", nullptr);
-        ImGui::Checkbox("##fps", &settings_.fps_counter);
-        Row("Pause on focus loss", "Stops the game while another window is in front.");
-        ImGui::Checkbox("##pause", &settings_.pause_on_focus_loss);
-        Row("Settings menu key", "The key that opens the in-game settings menu. Pick another if F10 does nothing on "
-                                 "your keyboard (laptops often need Fn for it). L3 + R3 on a controller always works.");
+    void GamePage() {
+        PageTitle("Game", "In-game overlay and behaviour.");
+        BeginCard("game");
+        BeginSetting("FPS counter", "Shows the frame rate in the corner.", true);
+        ToggleRight("fps", settings_.fps_counter);
+        EndSetting();
+        BeginSetting("Pause on focus loss", "Stops the game while another window is in front.");
+        ToggleRight("pause", settings_.pause_on_focus_loss);
+        EndSetting();
+        BeginSetting("Settings menu key", "Opens the in-game settings. Pick another if F10 does nothing on your keyboard "
+                                          "(laptops often need Fn for it). L3 + R3 on a controller always works.");
         static const std::vector<uint32_t> keys = {VK_F10, VK_F1, VK_F2, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9,
                                                    VK_F11, VK_F12, VK_INSERT, VK_HOME, VK_END, VK_PRIOR, VK_NEXT,
                                                    VK_PAUSE, VK_SCROLL, VK_OEM_3};
@@ -796,66 +933,94 @@ private:
             return n;
         }();
         Combo<uint32_t>("##key", settings_.menu_key, keys, names);
-        Row("Keep launcher open", "Leave this window open while the game runs.");
-        ImGui::Checkbox("##keep", &settings_.keep_open);
-        ImGui::EndTable();
+        EndSetting();
+        EndCard();
+        BeginCard("launcher");
+        BeginSetting("Keep launcher open", "Leave this window open while the game runs.", true);
+        ToggleRight("keep", settings_.keep_open);
+        EndSetting();
+        EndCard();
     }
 
-    void ControlsTab() {
-        ImGui::TextWrapped("Xbox, PlayStation and Switch controllers play as player 1, with rumble. The keyboard plays "
-                           "alongside.");
-        static const char* kKeys[][2] = {
-            {"W A S D", "Move"},         {"Arrow keys", "Camera"},           {"K / Space", "A (jump)"},
-            {"J", "X (attack)"},         {"L", "B"},                         {"I", "Y"},
-            {"Q / E", "Triggers"},     {"Z / C", "White / black"},   {"Enter", "Start"},
-            {"Backspace", "Back"},       {"Numpad 8 2 4 6", "D-pad"},        {"L3 + R3", "Settings menu"},
+    void ControlsPage() {
+        PageTitle("Controls", "Xbox, PlayStation and Switch controllers play as player 1, with rumble. The keyboard "
+                              "plays alongside.");
+        BeginCard("keys");
+        std::string menu = KeyName(settings_.menu_key);
+        const char* kKeys[][2] = {
+            {"W A S D", "Move"},  {"Arrows", "Camera"},     {"K / Space", "Jump (A)"}, {"J", "Attack (X)"},
+            {"L", "B"},           {"I", "Y"},               {"Q / E", "Triggers"},     {"Z / C", "White / Black"},
+            {"Enter", "Start"},   {"Backspace", "Back"},    {"Num 8 2 4 6", "D-pad"},  {menu.c_str(), "Settings menu"},
         };
-        if (ImGui::BeginTable("keys", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
-            auto cell = [](const char* key, const char* what) {
+        if (ImGui::BeginTable("keys", 4, ImGuiTableFlags_SizingStretchProp)) {
+            for (auto& k : kKeys) {
                 ImGui::TableNextColumn();
-                ImGui::TextColored(kGold, "%s", key);
+                Keycap(k[0]);
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(what);
-            };
-            std::string menu = KeyName(settings_.menu_key);
-            cell(menu.c_str(), "Settings menu");
-            for (auto& k : kKeys) cell(k[0], k[1]);
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + S(3));
+                ImGui::TextUnformatted(k[1]);
+            }
             ImGui::EndTable();
         }
+        EndCard();
     }
 
-    bool Footer() {
-        ImGui::Dummy({0, S(4)});
-        ImVec2 row = ImGui::GetCursorPos();
-        float h = S(44);
-        if (GothicButton("Defaults", {S(130), h})) {
-            settings_.Defaults();
-            status_ = "Defaults restored. Save or Play keeps them.";
+    void FilesPage() {
+        PageTitle("Game files", "Your own copy of the game: the USA (NTSC-U) release, as a disc image or extracted.");
+        BeginCard("status");
+        if (files_.assets.empty()) {
+            Status(kIconWarn, kRed, "No assets folder found");
+        } else {
+            switch (files_.xbe) {
+                case Files::Xbe::Match: Status(kIconCheck, kGreen, "default.xbe  -  USA release, ready"); break;
+                case Files::Xbe::Other: Status(kIconWarn, kRed, "default.xbe  -  another release, only the USA one works"); break;
+                case Files::Xbe::Missing: Status(kIconWarn, kMuted, "default.xbe  -  not extracted"); break;
+            }
+            for (const fs::path& iso : files_.isos) Status(kIconDisc, kGreen, "Disc image  -  " + Utf8(iso.filename().wstring()));
         }
-        ImGui::SameLine(0, S(12));
-        if (GothicButton("Save", {S(110), h}))
-            status_ = settings_.Save() ? "Settings saved." : "Could not write the settings file.";
-        ImGui::SameLine(0, S(18));
-        ImGui::SetCursorPosY(row.y + (h - ImGui::GetTextLineHeight()) * 0.5f);
-        ImGui::PushFont(g_body);
-        if (!status_.empty()) ImGui::TextColored(kGold, "%s", status_.c_str());
-        else ImGui::TextColored(kDim, "Also changeable in game.");
-        ImGui::PopFont();
-        float play_w = S(230);
-        ImGui::SetCursorPos({ImGui::GetWindowContentRegionMax().x - play_w - S(6), row.y - S(4)});
-        bool can = files_.Playable() && !import_.running;
-        ImGui::BeginDisabled(!can);
-        bool play = GothicButton("PLAY", {play_w, h + S(8)}, true);
-        ImGui::EndDisabled();
-        if (!can && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip(files_.exe ? "Add the game files first." : "Castlevania.exe is missing.");
-        if (play) return Play();
-        return true;
+        if (!files_.exe) Status(kIconWarn, kRed, "Castlevania.exe is not beside the launcher");
+        if (!files_.assets.empty() && files_.xbe == Files::Xbe::Missing && files_.isos.empty())
+            Wrapped(g_small, kMuted, "Add your disc image (.iso), or extract the disc into the assets folder: default.xbe "
+                                     "with its data, movie and sound folders.");
+        if (!files_.assets.empty()) Wrapped(g_small, kMuted, Utf8(files_.assets.wstring()).c_str());
+        ImGui::Dummy({0, S(6)});
+        if (import_.running) {
+            ImGui::ProgressBar(import_.progress, {-FLT_MIN, S(36)}, "Copying disc image...");
+        } else {
+            if (Button("Add disc image", {0, 0}, Kind::Primary, kIconAdd)) AddImage();
+            ImGui::SameLine();
+            if (Button("Open folder", {0, 0}, Kind::Secondary, kIconFolder)) {
+                fs::path a = files_.assets.empty() ? ExeDir() / "assets" : files_.assets;
+                std::error_code ec;
+                fs::create_directories(a, ec);
+                Open(a);
+                rescan_ = true;
+            }
+            ImGui::SameLine();
+            if (Button("Check again", {0, 0}, Kind::Secondary, kIconRefresh)) rescan_ = true;
+        }
+        EndCard();
+        BeginCard("folders");
+        Text(g_semi, kText, "Saves and logs");
+        Wrapped(g_small, kMuted, "Saves are kept beside the game in hdd\\E\\UDATA\\4b4e002d.");
+        ImGui::Dummy({0, S(4)});
+        if (Button("Open saves", {0, 0}, Kind::Secondary, kIconSave)) {
+            fs::path s = ExeDir() / kSaves;
+            std::error_code ec;
+            Open(fs::exists(s, ec) ? s : ExeDir());
+        }
+        ImGui::SameLine();
+        if (Button("Open logs", {0, 0}, Kind::Secondary, kIconLog)) {
+            std::error_code ec;
+            Open(fs::exists(ExeDir() / "logs", ec) ? ExeDir() / "logs" : ExeDir());
+        }
+        EndCard();
     }
 
     bool Play() {
+        saved_ = Snapshot();
         if (!settings_.Save()) {
-            status_ = "Could not write the settings file.";
+            Note("Could not write the settings file");
             return true;
         }
         fs::path exe = ExeDir() / kGameExe;
@@ -863,14 +1028,14 @@ private:
         STARTUPINFOW si{sizeof(si)};
         PROCESS_INFORMATION pi{};
         if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, ExeDir().c_str(), &si, &pi)) {
-            status_ = "Could not start the game (error " + std::to_string(GetLastError()) + ").";
+            Note("Could not start the game (error " + std::to_string(GetLastError()) + ")");
             return true;
         }
         // the game may bring its window to the front
         AllowSetForegroundWindow(pi.dwProcessId);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-        status_ = "The castle awaits.";
+        Note("Game started");
         return settings_.keep_open;
     }
 
@@ -889,7 +1054,7 @@ private:
         fs::path to = assets / from.filename();
         std::error_code ec;
         if (fs::equivalent(from.parent_path(), assets, ec)) {
-            status_ = "That image is already in the assets folder.";
+            Note("That image is already in the assets folder");
             rescan_ = true;
             return;
         }
@@ -901,9 +1066,10 @@ private:
     Files files_;
     Import import_;
     std::vector<Res> modes_;
-    std::string status_;
+    std::string status_, saved_;
+    double status_time_ = -100;
     bool rescan_ = false;
-    int tab_ = 0;
+    int page_ = 0;
 };
 
 }  // namespace
@@ -921,7 +1087,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     wc.lpszClassName = L"CastlevaniaLauncher";
     RegisterClassExW(&wc);
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT r{0, 0, LONG(1000 * scale), LONG(660 * scale)};
+    RECT r{0, 0, LONG(1060 * scale), LONG(690 * scale)};
     AdjustWindowRectExForDpi(&r, style, FALSE, 0, GetDpiForSystem());
     int w = r.right - r.left, h = r.bottom - r.top;
     g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"Castlevania: Curse of Darkness - Launcher", style,
@@ -966,7 +1132,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
         ImGui::NewFrame();
         if (!launcher.Frame()) running = false;
         ImGui::Render();
-        const float clear[4] = {0.01f, 0.02f, 0.04f, 1};
+        const float clear[4] = {13 / 255.0f, 14 / 255.0f, 18 / 255.0f, 1};
         g_ctx->OMSetRenderTargets(1, &g_rtv, nullptr);
         g_ctx->ClearRenderTargetView(g_rtv, clear);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
