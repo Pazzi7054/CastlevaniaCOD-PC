@@ -1,4 +1,4 @@
-# Castlevania: Curse of Darkness - XBE Recomp
+﻿# CastlevaniaCOD-PC
 
 An unofficial native PC port of the original Xbox version of Castlevania: Curse of Darkness (USA), statically
 recompiled with [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp). Rendering runs on Direct3D 12,
@@ -37,7 +37,7 @@ this repo's SDK changes applied:
 ```
 git clone https://github.com/TGP482/XboxXBERecomp ..\XboxXBE-Recomp
 git -C ..\XboxXBE-Recomp checkout 99078b1
-git -C ..\XboxXBE-Recomp apply ..\Castle-XBERecomp\sdk-patches\xboxxbe-recomp.patch
+git -C ..\XboxXBE-Recomp apply ..\CastlevaniaCOD-PC\sdk-patches\xboxxbe-recomp.patch
 ```
 
 Put your own extracted game files (`default.xbe` and the `data`, `movie`, `sound` folders) in `assets`, then run
