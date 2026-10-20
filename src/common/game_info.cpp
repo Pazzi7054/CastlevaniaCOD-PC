@@ -1,4 +1,4 @@
-#include "app/app.h"
+﻿#include "app/app.h"
 #include "core/input.h"
 
 void KeyboardWindow(void* hwnd);                // keyboard.cpp
@@ -10,7 +10,7 @@ const app::GameInfo app::kGame = {
     .short_title = L"Castlevania",        // message boxes
     .name = L"Castlevania",               // window classes, crash dumps, handover event
     .log = "castlevania",                 // log file prefix
-    .settings = "settings.toml",          // settings file beside the exe
+    .settings = "castlevania.toml",       // settings file beside the exe
     .splash = L"splash",                  // optional splash.png or splash.bmp beside the exe
     .missing = L"Put the game in the assets folder: its disc image (.iso), or default.xbe with its folders beside it.",
     .images = {{"default.xbe", "Castlevania"}},  // each recompiled xbe and its exe, for title launches

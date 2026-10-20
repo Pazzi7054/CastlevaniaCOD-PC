@@ -1,4 +1,4 @@
-# build
+﻿# build
 /out/
 /build/
 *.zip
@@ -15,6 +15,7 @@
 
 # runtime files
 settings.toml
+castlevania.toml
 /logs/
 /hdd/
 /CrashDumps/
@@ -31,3 +32,11 @@ settings.toml
 build_log*.txt
 /tools/shots/
 /tools/cap*/
+
+# game data, disc images and binaries never go in the repository
+*.iso
+*.xbe
+*.xiso
+*.dll
+*.7z
+*.rar
