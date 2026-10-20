@@ -136,6 +136,9 @@ void GraphicsTab(bool& save) {
                              {"50%", "75%", "100%", "150%", "200%"});
     Row("Anisotropic filtering", "Sharper textures at an angle.");
     save |= Choice<uint32_t>("##aniso", s.aniso, {0, 2, 4, 8, 16}, {"Off", "2x", "4x", "8x", "16x"});
+    Row("Widescreen", "16:9 with more of the world at the sides; the HUD, menus and movies stay 4:3 in the middle. "
+                      "Off shows the game 4:3, as on a 4:3 TV. Needs a 16:9 or wider resolution.");
+    save |= ImGui::Checkbox("##wide", &s.widescreen);
     ImGui::EndTable();
 }
 
@@ -156,6 +159,7 @@ void ControlsTab() {
         {"J", "X (attack)"},           {"L", "B"},                 {"I", "Y"},
         {"Q / E", "Left / right trigger"}, {"Z / C", "White / black"}, {"Enter", "Start"},
         {"Backspace", "Back"},         {"Numpad 8 2 4 6", "D-pad"}, {"F10", "This menu"},
+        {"L3 + R3 (controller)", "This menu"},
     };
     if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
         for (auto& k : kKeys) {
@@ -213,6 +217,7 @@ void Style(float scale) {
 }  // namespace
 
 bool MenuOpen() { return g_open; }
+void MenuToggle() { g_open = !g_open; }
 
 // the game window is up, before the first frame: the font, sized for the monitor
 void MenuWindow() {

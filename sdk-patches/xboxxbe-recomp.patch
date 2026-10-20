@@ -1,3 +1,54 @@
+diff --git a/runtime/app/app.h b/runtime/app/app.h
+index d3519d5..ec36f97 100644
+--- a/runtime/app/app.h
++++ b/runtime/app/app.h
+@@ -22,6 +22,7 @@ struct Settings {
+     uint32_t fps_cap = 60;           // 0 unlimited
+     bool vsync = true;
+     uint32_t aniso = 0;              // 0 as the game asks
++    bool widescreen = true;          // false: 4:3 on a wide output too
+     std::string join_ip;                   // co-op: a host past the LAN the system link search also asks
+ };
+ 
+@@ -37,7 +38,8 @@ struct Mode {
+ Mode Desktop();
+ Mode Output();
+ float RenderScale(uint32_t guest_height);
+-// the output is 3:2 or wider: the console reports a widescreen TV and the frame is shown 16:9, else 4:3 as on a 4:3 TV
++// the output is 3:2 or wider and widescreen is on: the console reports a widescreen TV and the frame is shown 16:9,
++// else 4:3 as on a 4:3 TV
+ bool Widescreen();
+ 
+ std::filesystem::path ExeDir();
+diff --git a/runtime/app/settings.cpp b/runtime/app/settings.cpp
+index 4b494d0..64714f0 100644
+--- a/runtime/app/settings.cpp
++++ b/runtime/app/settings.cpp
+@@ -49,6 +49,7 @@ void Load() {
+     s.fps_cap = t["fps_cap"].value_or(s.fps_cap);
+     s.vsync = t["vsync"].value_or(s.vsync);
+     s.aniso = t["anisotropic_filtering"].value_or(s.aniso);
++    s.widescreen = t["widescreen"].value_or(s.widescreen);
+     s.join_ip = t["join_ip"].value_or(s.join_ip);
+     for (const Option& o : kGame.options) {
+         if (o.flag) *o.flag = t[o.key].value_or(*o.flag);
+@@ -68,6 +69,7 @@ toml::table Table() {
+                   {"fps_cap", int64_t(s.fps_cap)},
+                   {"vsync", s.vsync},
+                   {"anisotropic_filtering", int64_t(s.aniso)},
++                  {"widescreen", s.widescreen},
+                   {"join_ip", s.join_ip}};
+     for (const Option& o : kGame.options) {
+         if (o.flag) t.insert(o.key, *o.flag);
+@@ -120,7 +122,7 @@ bool Widescreen() {
+         Mode m = Output();
+         wide = m.width * 2 >= m.height * 3;  // 3:2 or wider
+     }
+-    return wide;
++    return wide && s.widescreen;
+ }
+ 
+ float RenderScale(uint32_t guest_height) {
 diff --git a/runtime/core/log.cpp b/runtime/core/log.cpp
 index 7e6507d..d3c271d 100644
 --- a/runtime/core/log.cpp
@@ -13,11 +64,70 @@ index 7e6507d..d3c271d 100644
      char msg[4096];
      va_list ap;
      va_start(ap, fmt);
+diff --git a/runtime/gpu/d3d12.cpp b/runtime/gpu/d3d12.cpp
+index c410f12..85bad7f 100644
+--- a/runtime/gpu/d3d12.cpp
++++ b/runtime/gpu/d3d12.cpp
+@@ -2478,6 +2478,7 @@ void D3D12Backend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
+     if (ext_) ext_->BeginDraw(s);
+     Assembled& a = asm_;
+     if (!AssembleDraw(s, prim, start, count, indices, a)) return;
++    if (ext_) ext_->Vertices(s, a);
+     // past the ring every upload is a buffer of its own: seconds lost on a frame that draws a whole level once
+     if (CurrentFrame().used > kUploadSize - kUploadReserve) Submit(true);
+     if (!BindTargets(s)) return;
+diff --git a/runtime/gpu/ext.h b/runtime/gpu/ext.h
+index ce6acda..0cb6e37 100644
+--- a/runtime/gpu/ext.h
++++ b/runtime/gpu/ext.h
+@@ -17,6 +17,7 @@
+ #include "gpu/shaders.h"
+ #include "gpu/state.h"
+ #include "gpu/texture.h"
++#include "gpu/vertex.h"
+ 
+ namespace gpu {
+ 
+@@ -74,6 +75,8 @@ public:
+     virtual void MakeTarget(const Surface&, bool /*depth*/, uint32_t /*gw*/, uint32_t /*gh*/, float& /*scale*/, DXGI_FORMAT& /*fmt*/) {}
+     virtual void BeginDraw(const State&) {}
+     virtual void EndDraw() {}
++    // the draw's vertices as assembled, before its targets are bound
++    virtual void Vertices(const State&, const Assembled&) {}
+     // targets bound for a draw; true binds them again
+     virtual bool Bound(Context&, const State&, Target* /*rt*/, Target* /*ds*/, bool /*pretransformed*/) { return false; }
+     // stage samples surface data: key picks the copy, k its texels per render scale texel, box allows the spread taps
 diff --git a/runtime/gpu/shaders.cpp b/runtime/gpu/shaders.cpp
-index 7e67b26..b61ddb0 100644
+index 7e67b26..d639366 100644
 --- a/runtime/gpu/shaders.cpp
 +++ b/runtime/gpu/shaders.cpp
-@@ -625,6 +625,16 @@ PixelKey MakePixelKey(const State& s, const TexInfo tex[4]) {
+@@ -232,7 +232,7 @@ const char* kVsEpilogue = R"(
+     q.xyz *= p.w;
+     q.w = p.w;
+     o.pos = q;
+-    o.d0 = saturate(oD0);
++@POSITION@    o.d0 = saturate(oD0);
+     o.d1 = saturate(oD1);
+     o.b0 = saturate(oB0);
+     o.b1 = saturate(oB1);
+@@ -245,6 +245,16 @@ const char* kVsEpilogue = R"(
+ }
+ )";
+ 
++// the epilogue's @POSITION@ mark, before the line it starts: ShaderHooks::Position
++std::string WithPosition(std::string s) {
++    constexpr std::string_view kMark = "@POSITION@";
++    size_t at = s.find(kMark);
++    if (at != std::string::npos) s.replace(at, kMark.size(), Hooks().Position());
++    return s;
++}
++
++std::string VsEpilogue() { return WithPosition(kVsEpilogue); }
++
+ const char* kVsPrologue = R"(
+     int a0 = 0;
+     // precise: EQUAL depth passes need bit exact positions
+@@ -625,6 +635,16 @@ PixelKey MakePixelKey(const State& s, const TexInfo tex[4]) {
          const auto& t = s.tss[size_t(i)];
          uint32_t v[9] = {t[kTssColorOp], t[kTssColorArg1], t[kTssColorArg2], t[kTssColorArg0], t[kTssAlphaOp],
                           t[kTssAlphaArg1],  t[kTssAlphaArg2], t[kTssAlphaArg0], t[kTssResultArg]};
@@ -34,6 +144,86 @@ index 7e67b26..b61ddb0 100644
          std::memcpy(k.ff[i], v, sizeof(v));
          if (program || (t[kTssTextureTransformFlags] & 0x100)) k.proj |= 1u << i;  // D3DTTFF_PROJECTED
          if (t[kTssColorOp] <= 1) break;
+@@ -635,17 +655,19 @@ PixelKey MakePixelKey(const State& s, const TexInfo tex[4]) {
+ constexpr uint32_t kMuxConstant = 3;
+ constexpr uint32_t kViewportOffsetConstant = 59;  // c-37: constants start at c-96
+ 
+-bool ReadsViewportOffset(const std::vector<uint32_t>& prog) {
++bool ReadsConstant(const std::vector<uint32_t>& prog, uint32_t reg) {
+     for (size_t n = 0; n + 4 <= prog.size(); n += 4) {
+         Tok k{&prog[n]};
+         // an instruction reads at most one constant, through any of its operands
+         bool constant = k.f(2, 26, 2) == kMuxConstant || k.f(2, 11, 2) == kMuxConstant || k.f(3, 28, 2) == kMuxConstant;
+         bool relative = k.f(3, 1, 1);
+-        if (constant && !relative && k.f(1, 13, 8) == kViewportOffsetConstant) return true;
++        if (constant && !relative && k.f(1, 13, 8) == reg) return true;
+     }
+     return false;
+ }
+ 
++bool ReadsViewportOffset(const std::vector<uint32_t>& prog) { return ReadsConstant(prog, kViewportOffsetConstant); }
++
+ std::string VertexProgramHlsl(const std::vector<uint32_t>& prog, uint16_t regs, uint64_t decode) {
+     std::string s = Common();
+     s += kVsHelpers;
+@@ -684,7 +706,7 @@ std::string VertexProgramHlsl(const std::vector<uint32_t>& prog, uint16_t regs,
+         }
+         if (k.f(3, 0, 1)) break;  // last instruction
+     }
+-    s += kVsEpilogue;
++    s += VsEpilogue();
+     return s;
+ }
+ 
+@@ -797,7 +819,7 @@ std::string FixedVertexHlsl(uint16_t regs, bool pretransformed, uint64_t decode,
+         s += "    }\n";
+     }
+     s += "    oFog = " + v(5, "float4(0,0,0,0)") + ";\n";
+-    if (pretransformed) return s + kVsEpilogue;
++    if (pretransformed) return s + VsEpilogue();
+     s += R"(
+     VOut o;
+     // like the pretransformed ones, target sized passes end half a console pixel short of the far edges
+@@ -805,7 +827,7 @@ std::string FixedVertexHlsl(uint16_t regs, bool pretransformed, uint64_t decode,
+     if (surf.w == 0 && abs(sp.x - (surf.x - 0.5)) < 1e-3) cp.x = cp.w;
+     if (surf.w == 0 && abs(sp.y - (surf.y - 0.5)) < 1e-3) cp.y = -cp.w;
+     o.pos = cp;
+-    o.d0 = saturate(oD0);
++@POSITION@    o.d0 = saturate(oD0);
+     o.d1 = saturate(oD1);
+     o.b0 = o.d0;
+     o.b1 = o.d1;
+@@ -817,7 +839,7 @@ std::string FixedVertexHlsl(uint16_t regs, bool pretransformed, uint64_t decode,
+     return o;
+ }
+ )";
+-    return s;
++    return WithPosition(s);
+ }
+ 
+ std::string PixelHlsl(const PixelKey& k) {
+diff --git a/runtime/gpu/shaders.h b/runtime/gpu/shaders.h
+index 9b8cbdd..e636653 100644
+--- a/runtime/gpu/shaders.h
++++ b/runtime/gpu/shaders.h
+@@ -45,6 +45,8 @@ PixelKey MakePixelKey(const State& s, const TexInfo tex[4]);
+ std::string VertexProgramHlsl(const std::vector<uint32_t>& program, uint16_t regs, uint64_t decode = 0);
+ // the program reads c-37, the viewport offset that carries the XDK's half pixel screen space offset
+ bool ReadsViewportOffset(const std::vector<uint32_t>& program);
++// the program reads constant reg (hardware order: D3D register + 96) other than through a0
++bool ReadsConstant(const std::vector<uint32_t>& program, uint32_t reg);
+ // fixed function vertex state a shader is built for
+ struct FixedKey {
+     uint32_t light = 0;    // bit 0 lighting, 1 specular, 2 local viewer, 3 normalize, then D3DMCS 2 bits each from bit 8:
+@@ -75,6 +77,8 @@ struct ShaderHooks {
+     virtual std::string Fetched(const TexInfo&, int) const { return {}; }
+     // outc to the target, after the alpha test
+     virtual std::string Output() const;
++    // o.pos once set, in clip space, by programs and fixed function alike
++    virtual std::string Position() const { return {}; }
+ };
+ inline const ShaderHooks* g_shader_hooks = nullptr;
+ 
 diff --git a/runtime/xdk/d3d8.cpp b/runtime/xdk/d3d8.cpp
 index cb38363..40af2dd 100644
 --- a/runtime/xdk/d3d8.cpp

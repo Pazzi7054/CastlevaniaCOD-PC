@@ -7,6 +7,7 @@ bool MenuMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* 
 void MenuUi(double fps);                      // menu.cpp
 extern bool g_fps_counter;                    // menu.cpp
 extern bool g_pause_on_focus_loss;            // menu.cpp
+void WidescreenInit();                        // widescreen.cpp
 
 // what the runtime asks of the game; strings must be set, hooks may stay null
 const app::GameInfo app::kGame = {
@@ -22,7 +23,7 @@ const app::GameInfo app::kGame = {
                 {"pause_on_focus_loss", &g_pause_on_focus_loss, nullptr}},
     .load = nullptr,                      // reads more from the settings file's toml::table
     .save = nullptr,                      // writes more into it
-    .init = nullptr,                      // after the settings load, before the window and boot
+    .init = WidescreenInit,               // after the settings load, before the window and boot: the renderer extension
     .loaded = nullptr,                    // image in memory, before its entry point runs
     .window = KeyboardWindow,             // the game window is up: keyboard focus and the menu's font
     .message = MenuMessage,               // window messages first; true takes one: F10 for the menu

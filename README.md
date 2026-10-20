@@ -37,12 +37,18 @@ PC from your own copy (see [Building](#building)).
 ## Features
 
 ### Settings Menu
-Press **F10** in game for the settings menu. Every change applies at once and is saved to `castlevania.toml`. While
-the menu is open the game gets no input; Escape or F10 closes it.
+Press **F10** in game for the settings menu, or click both sticks in (**L3 + R3**) on a controller. Every change
+applies at once and is saved to `castlevania.toml`. While the menu is open the game gets no input; Escape, F10 or
+L3 + R3 closes it.
 
 ### Display
 - **Any Resolution** - Renders at your display's resolution instead of 640x480.
 - **Display Modes** - Fullscreen, borderless or windowed, with vsync.
+- **Widescreen** - On a 16:9 or wider display the game is shown 16:9 with more of the world at the sides (Hor+),
+  without stretching. The HUD, menus and movies stay 4:3 in the middle. Turn it off in the menu (Graphics) for the
+  original 4:3 picture.
+- **No Overscan Streaks** - The rows a TV's overscan used to hide at the top and bottom of the picture no longer
+  smear; the frame fills the screen.
 
 ### Graphics
 - **Native Direct3D 12 Renderer** - The game's Direct3D 8 calls, fixed function stages and paletted textures are
@@ -72,7 +78,7 @@ The keyboard plays as player 1 while the window is in front:
 | Z / C | white / black |
 | Enter / Backspace | Start / Back |
 | numpad 8 2 4 6 | d-pad |
-| F10 | settings menu |
+| F10 | settings menu (L3 + R3 on a controller) |
 
 ### Miscellaneous
 - **Boot Splash** - Place a `splash.png` (or `.bmp`) beside the exe to display a splash screen at launch.
@@ -117,7 +123,17 @@ Changes this game needed beyond the generated config:
   DirectSound ones are named from the image's `.XTLID` table.
 - `sdk-patches\xboxxbe-recomp.patch`: host versions of `DrawIndexedVerticesUP` and the five DirectSound methods; a
   fixed-function stage with no texture that reads `D3DTA_TEXTURE` ends the stage cascade, as XDK D3D does (without it
-  every single texture quad drew white); `XBE_VERBOSE` lets a release build log info lines.
+  every single texture quad drew white); `XBE_VERBOSE` lets a release build log info lines; a `widescreen` setting;
+  for renderer extensions, `ShaderHooks::Position` (HLSL after the vertex position is set), `Extension::Vertices`
+  (each draw's assembled vertices) and `gpu::ReadsConstant`.
+- `src\common\widescreen.cpp`, a renderer extension:
+  - Widescreen. The game projects with a PS2 style view screen matrix (`c68`, or `c85` with the world matrix) and
+    maps PS2 screen space to console pixels with `c94`/`c95`. Each draw into the back buffer is squeezed to 3/4 of its
+    width around the centre: for draws that use the camera that is a wider field of view, for 2D draws a 4:3 shape.
+    Draws over the whole width stay whole when they are untextured (fades) or read a render target (the frame pass).
+  - Overscan. The last pass of each frame draws a copy of the frame back with its rows -16 to 496 over rows 0 to 480
+    (PS2 448 lines plus border shrunk into the NTSC frame); the 16 rows past each edge clamped into streaks. The pass
+    is drawn that much taller, so the copy fills the frame row for row.
 
 ### Testing
 - `tools\run_test.ps1 -Name x -At 10,20 -Env "CV_PAD_SCRIPT=@tools\scripts\newgame.txt"` runs the game, screenshots
@@ -127,8 +143,8 @@ Changes this game needed beyond the generated config:
   draw list.
 
 ## Known Issues
-- A band of streaks along the bottom edge of the 3D view.
-- Only the first area has been tested so far.
+- Widescreen: the game culls for its 4:3 view, so an object can appear late at the far left or right edge.
+- Only the first areas have been tested so far.
 
 ## Legal
 

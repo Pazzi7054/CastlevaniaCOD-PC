@@ -157,6 +157,7 @@ void Scripted(input::Pad& p) {
 }  // namespace
 
 bool MenuOpen();                     // menu.cpp
+void MenuToggle();                   // menu.cpp
 void MenuWindow();                   // menu.cpp
 extern bool g_pause_on_focus_loss;   // menu.cpp
 std::atomic<bool> g_closing{false};  // the window is closing: a paused game lets go
@@ -173,6 +174,11 @@ void KeyboardPad(int port, input::Pad& p) {
     if (g_pause_on_focus_loss && Script().empty())
         while (!Focused() && !g_closing && IsWindow(g_hwnd)) Sleep(50);
     p.connected = true;
+    // both sticks clicked in together: the menu from a controller
+    static bool sticks = false;
+    bool both = (p.buttons & 0xC0) == 0xC0;
+    if (both && !sticks) MenuToggle();
+    sticks = both;
     if (MenuOpen()) {
         // the menu has the keyboard and controller
         p = input::Pad{};
