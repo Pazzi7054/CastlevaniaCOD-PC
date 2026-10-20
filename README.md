@@ -173,6 +173,10 @@ Changes this game needed beyond the generated config:
   block as PCSX2 does; its palette is hashed as the GS holds it (R G B A, alpha halved). The pair names the picture.
   PNGs load on worker threads through WIC with their PS2 alpha (128 opaque) doubled. The SDK patch adds
   `Extension::Replace` and `Replaced`, `gpu::PaletteIndices`, and the backend draws a replacement with every level.
+- `src\game\hooks.cpp`: widescreen culling. The camera (`sub_00012CD0`, a PS2 libvu0 style camera) makes its
+  view screen matrices and the clip data objects are culled against; with widescreen on, the clip data's x scale
+  (`0x012FC500`, `0x012FC5C0`, `0x012FC640`, `0x012FC660`) is made 3/4, so objects in the wider view are drawn
+  instead of popping in at the edges. The matrices the scene is drawn with are untouched.
 - `src\common\widescreen.cpp`, a renderer extension:
   - Widescreen. The game projects with a PS2 style view screen matrix (`c68`, or `c85` with the world matrix) and
     maps PS2 screen space to console pixels with `c94`/`c95`. Each draw into the back buffer is squeezed to 3/4 of its
@@ -190,7 +194,6 @@ Changes this game needed beyond the generated config:
   draw list.
 
 ## Known Issues
-- Widescreen: the game culls for its 4:3 view, so an object can appear late at the far left or right edge.
 - Only the first areas have been tested so far.
 
 ## Legal
