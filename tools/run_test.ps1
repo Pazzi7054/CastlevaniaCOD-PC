@@ -1,4 +1,4 @@
-# Test run: starts the built exe, screenshots its window at the given seconds
+﻿# Test run: starts the built exe, screenshots its window at the given seconds
 # (copied from the screen, so D3D12 output is captured), then kills it and
 # prints the tail of logs\castlevania.log. Shots land in tools\shots\<name>_t<s>.png.
 param(
@@ -6,6 +6,7 @@ param(
     [int[]]$At = @(10, 20, 30),
     [int]$Seconds = 0,
     [int[]]$F3At = @(),        # press F3 then: guest stacks into the log, a frame capture if XBE_CAPTURE_DIR is set
+    [int[]]$F10At = @(),       # press F10 then: the settings menu opens or closes
     [string[]]$Env = @()       # NAME=value pairs for this run
 )
 foreach ($kv in $Env) { $k, $v = $kv -split "=", 2; Set-Item "env:$k" $v }
@@ -32,6 +33,11 @@ for ($t = 1; $t -le $end; $t++) {
         [void][W2]::PostMessage($p.MainWindowHandle, 0x100, [IntPtr]0x72, [IntPtr]::Zero)  # WM_KEYDOWN VK_F3
         "t=$t F3"
     }
+    if ($F10At -contains $t) {
+        $p.Refresh()
+        [void][W2]::PostMessage($p.MainWindowHandle, 0x104, [IntPtr]0x79, [IntPtr]::Zero)  # WM_SYSKEYDOWN VK_F10
+        "t=$t F10"
+    }
     if ($At -contains $t) {
         $p.Refresh(); $h = $p.MainWindowHandle
         if ($h -eq [IntPtr]::Zero) { "t=$t no window yet"; continue }
@@ -44,7 +50,7 @@ for ($t = 1; $t -le $end; $t++) {
         # keep files small: scale to 960 wide
         $sw = [Math]::Min(960, $w); $sh = [int]($ht * $sw / $w)
         $small = New-Object System.Drawing.Bitmap $bmp, $sw, $sh
-        $out = Join-Path $shots "$($Name)_t$t.png"; $small.Save($out); $small.Dispose(); $bmp.Dispose()
+        $out = Join-Path $shots "$($Name)_t$t.png"; $small.Save($out, [System.Drawing.Imaging.ImageFormat]::Png); $small.Dispose(); $bmp.Dispose()
         "t=$t shot $out (${w}x${ht})"
     }
 }

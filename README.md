@@ -36,15 +36,23 @@ PC from your own copy (see [Building](#building)).
 
 ## Features
 
+### Settings Menu
+Press **F10** in game for the settings menu. Every change applies at once and is saved to `castlevania.toml`. While
+the menu is open the game gets no input; Escape or F10 closes it.
+
 ### Display
-- **Any Resolution** - Renders at your display's resolution instead of 640x480, with `render_percent` for
-  supersampling.
-- **Display Modes** - Fullscreen, borderless or windowed, with a frame rate cap and vsync.
+- **Any Resolution** - Renders at your display's resolution instead of 640x480.
+- **Display Modes** - Fullscreen, borderless or windowed, with vsync.
 
 ### Graphics
 - **Native Direct3D 12 Renderer** - The game's Direct3D 8 calls, fixed function stages and paletted textures are
   drawn natively.
+- **Render Scale** - 50% to 200% of the output height; above 100% supersamples.
 - **Anisotropic Filtering** - Up to 16x.
+
+### General
+- **FPS Counter** - Optional, in the corner.
+- **Pause on Focus Loss** - The game stops while another window is in front (on by default).
 
 ### Controller
 Supports Xbox, PlayStation and Switch controllers, with hot plugging and rumble.
@@ -64,6 +72,7 @@ The keyboard plays as player 1 while the window is in front:
 | Z / C | white / black |
 | Enter / Backspace | Start / Back |
 | numpad 8 2 4 6 | d-pad |
+| F10 | settings menu |
 
 ### Miscellaneous
 - **Boot Splash** - Place a `splash.png` (or `.bmp`) beside the exe to display a splash screen at launch.

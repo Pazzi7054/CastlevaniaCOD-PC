@@ -13,6 +13,7 @@
 // lsu lsd lsl lsr (left stick). "@file" reads the same entries from a file, one per line or comma separated.
 #include <windows.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -155,11 +156,29 @@ void Scripted(input::Pad& p) {
 
 }  // namespace
 
-void KeyboardWindow(void* hwnd) { g_hwnd = static_cast<HWND>(hwnd); }
+bool MenuOpen();                     // menu.cpp
+void MenuWindow();                   // menu.cpp
+extern bool g_pause_on_focus_loss;   // menu.cpp
+std::atomic<bool> g_closing{false};  // the window is closing: a paused game lets go
+
+void KeyboardWindow(void* hwnd) {
+    g_hwnd = static_cast<HWND>(hwnd);
+    MenuWindow();
+}
 
 void KeyboardPad(int port, input::Pad& p) {
     if (port != 0) return;
+    // pause on focus loss: the game stops at its pad read until the window is in front again; not in scripted runs,
+    // which go on behind other windows
+    if (g_pause_on_focus_loss && Script().empty())
+        while (!Focused() && !g_closing && IsWindow(g_hwnd)) Sleep(50);
     p.connected = true;
+    if (MenuOpen()) {
+        // the menu has the keyboard and controller
+        p = input::Pad{};
+        p.connected = true;
+        return;
+    }
     Keyboard(p);
     Scripted(p);
 }
